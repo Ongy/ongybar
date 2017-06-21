@@ -1,0 +1,6 @@
+[package]
+name = "ongybar"
+version = "0.1.0"
+authors = ["Markus Ongyerth <ongy@ongy.net>"]
+
+[dependencies]
