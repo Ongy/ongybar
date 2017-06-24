@@ -85,7 +85,15 @@ unsafe fn set_as_dock(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong) 
 //    (xlib.XConfigureWindow)(dpy, win, (xlib::CWX | xlib::CWY) as u32, &mut changes as *mut xlib::XWindowChanges);
 //}
 
-//unsafe 
+unsafe extern fn handle_error(_: *mut xlib::Display, err: *mut xlib::XErrorEvent) -> i32 {
+    println!("Error {}: {}", (*err).type_, (*err).error_code);
+    return 0;
+}
+
+unsafe extern fn handle_io_error(_: *mut xlib::Display) -> i32 {
+    println!("IOError");
+    return 0;
+}
 
 unsafe fn create_xwin() {
     let xlib = xlib::Xlib::open().unwrap();
@@ -93,7 +101,10 @@ unsafe fn create_xwin() {
     let dpy = (xlib.XOpenDisplay)(ptr::null());
     let screen = (xlib.XDefaultScreen)(dpy);
     let root = (xlib.XRootWindow)(dpy, screen);
-    
+
+    (xlib.XSetErrorHandler)(Some(handle_error));
+    (xlib.XSetIOErrorHandler)(Some(handle_io_error));
+
     // Hook close requests
     let wm_protocols = (xlib.XInternAtom)(dpy, cstr!("WM_PROTOCOLS"), xlib::False);
     let wm_delete_window = (xlib.XInternAtom)(dpy, cstr!("WM_DELETE_WINDOW"), xlib::False);
@@ -136,7 +147,7 @@ unsafe fn create_xwin() {
                                    xlib::InputOutput as u32, (*visual).visual,
                                    xlib::CWBackPixel | xlib::CWColormap | xlib::CWBorderPixel | xlib::CWEventMask,
                                    &mut attrs as *mut xlib::XSetWindowAttributes);
-    if win == 0 {
+    if win <= 0 {
         println!("Couldn't create glx window");
         return;
     }
@@ -159,7 +170,6 @@ unsafe fn create_xwin() {
 
     let vendor = gl::GetString(gl::VENDOR);
     let cstr = std::ffi::CString::from_raw(vendor as *mut i8);
-
     println!("{}", cstr.into_string().unwrap());
 
     // Set window title
