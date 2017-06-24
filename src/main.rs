@@ -1,210 +1,357 @@
-extern crate x11_dl;
-extern crate hostname;
-extern crate libc;
+
+extern crate x11;
+extern crate xcb;
 extern crate gl;
+extern crate libc;
+extern crate byteorder;
+extern crate hostname;
 
-use std::ffi::CString;
-use std::io::Write;
-use std::mem;
+use xcb::dri2;
+
+use x11::xlib;
+use x11::glx::*;
+
 use std::os::raw::*;
-use std::ptr;
+use std::ptr::null_mut;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_int, c_void};
 
-use x11_dl::xlib;
-use x11_dl::glx;
+use byteorder::WriteBytesExt;
 
-macro_rules! cstr {
-  ($s:expr) => (
-    concat!($s, "\0") as *const str as *const [c_char] as *const c_char
-  );
+
+const GLX_CONTEXT_MAJOR_VERSION_ARB: u32 = 0x2091;
+const GLX_CONTEXT_MINOR_VERSION_ARB: u32 = 0x2092;
+
+type GlXCreateContextAttribsARBProc =
+    unsafe extern "C" fn (dpy: *mut xlib::Display, fbc: GLXFBConfig,
+            share_context: GLXContext, direct: xlib::Bool,
+            attribs: *const c_int) -> GLXContext;
+
+
+unsafe fn load_gl_func (name: &str) -> *mut c_void {
+    let cname = CString::new(name).unwrap();
+    let ptr: *mut c_void = std::mem::transmute(glXGetProcAddress(
+            cname.as_ptr() as *const u8
+    ));
+    if ptr.is_null() {
+        panic!("could not load {}", name);
+    }
+    ptr
 }
 
-unsafe fn set_wm_pid(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong) {
-    match hostname::get_hostname() {
-        None => writeln!(&mut std::io::stderr(), "Couldn't get hostname. Skipping _NET_WM_PID").unwrap(),
-        Some(name) => {
-            let mut host_name : (xlib::XTextProperty) = mem::uninitialized();
+fn check_glx_extension(glx_exts: &str, ext_name: &str) -> bool {
+    for glx_ext in glx_exts.split(" ") {
+        if glx_ext == ext_name {
+            return true;
+        }
+    }
+    false
+}
 
-            let name_str = CString::new(name).unwrap();
-            let mut name_ptr = name_str.into_raw();
-            (xlib.XStringListToTextProperty)(&mut name_ptr as *mut *mut c_char, 1, &mut host_name);
-            (xlib.XSetWMClientMachine)(dpy, win, &mut host_name);
-            (xlib.XFree)(host_name.value as *mut std::os::raw::c_void);
+static mut ctx_error_occurred: bool = false;
+unsafe extern "C" fn ctx_error_handler(
+        _dpy: *mut xlib::Display,
+        _ev: *mut xlib::XErrorEvent) -> i32 {
+    ctx_error_occurred = true;
+    0
+}
+
+
+unsafe fn check_gl_error() {
+    let err = gl::GetError();
+    if err != gl::NO_ERROR {
+        println!("got gl error {}", err);
+    }
+}
+
+// returns the glx version in a decimal form
+// eg. 1.3  => 13
+fn glx_dec_version(dpy: *mut xlib::Display) -> i32 {
+    let mut maj: c_int = 0;
+    let mut min: c_int = 0;
+    unsafe {
+        if glXQueryVersion(dpy,
+                &mut maj as *mut c_int,
+                &mut min as *mut c_int) == 0 {
+            panic!("cannot get glx version");
+        }
+    }
+    (maj*10 + min) as i32
+}
+
+
+fn get_glxfbconfig(dpy: *mut xlib::Display, screen_num: i32,
+        visual_attribs: &[i32]) -> GLXFBConfig {
+    unsafe {
+        let mut fbcount: c_int = 0;
+        let fbcs = glXChooseFBConfig(dpy, screen_num,
+                visual_attribs.as_ptr(),
+                &mut fbcount as *mut c_int);
+
+        if fbcount == 0 {
+            panic!("could not find compatible fb config");
+        }
+        // we pick the first from the list
+        let fbc = *fbcs;
+        xlib::XFree(fbcs as *mut c_void);
+        fbc
+    }
+}
+
+unsafe fn modify_atom(conn: &xcb::Connection, win: c_uint, mode: u8, name: &str, val: &str) {
+    let atom = xcb::intern_atom(conn, false, name).get_reply().unwrap().atom();
+    let value = [xcb::intern_atom(conn, false, val).get_reply().unwrap().atom()];
+
+    xcb::change_property(conn, mode, win,
+                         atom, xcb::ATOM_ATOM, 32,
+                         &value);
+}
+
+unsafe fn set_wm_pid(conn: &xcb::Connection, win: c_uint) {
+    match hostname::get_hostname() {
+        None => println!("Coudln't get hostname. Skipping _NET_WM_PID"),
+        Some(x) => {
+            xcb::change_property(conn, xcb::PROP_MODE_REPLACE as u8,
+                                 win, xcb::ATOM_WM_CLIENT_MACHINE,
+                                 xcb::ATOM_STRING, 8, x.as_bytes());
+
+            let atom = xcb::intern_atom(conn, false, "_NET_WM_PID").get_reply().unwrap().atom();
 
             let pid = libc::getpid();
+            let pid_buffer = [pid];
 
-            (xlib.XChangeProperty)(dpy, win,
-                                   (xlib.XInternAtom)(dpy, cstr!("_NET_WM_PID"), xlib::False),
-                                   (xlib.XInternAtom)(dpy, cstr!("CARDINAL"), xlib::False),
-                                   32, xlib::PropModeReplace, &pid as *const i32 as *const c_uchar, 1);
+            xcb::change_property(conn, xcb::PROP_MODE_REPLACE as u8,
+                                 win, atom, xcb::ATOM_CARDINAL, 32,
+                                 &pid_buffer);
         }
     }
 }
 
-unsafe fn mod_atom(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong,
-                   name: *const c_char, value: *const c_char, mode: c_int) {
-    let t = (xlib.XInternAtom)(dpy, value, xlib::False);
-    (xlib.XChangeProperty)(dpy, win,
-                           (xlib.XInternAtom)(dpy, name, xlib::False),
-                           (xlib.XInternAtom)(dpy, cstr!("ATOM"), xlib::False),
-                           32, mode, &t as *const u64 as *const c_uchar, 1);
+unsafe fn set_dock(conn: &xcb::Connection, win: c_uint) {
+    set_wm_pid(conn, win);
+
+    modify_atom(conn, win, xcb::PROP_MODE_REPLACE as u8,
+                "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DOCK");
+
+    modify_atom(conn, win, xcb::PROP_MODE_REPLACE as u8,
+                "_NET_WM_STATE", "_NET_WM_STATE_ABOVE");
+    modify_atom(conn, win, xcb::PROP_MODE_APPEND as u8,
+                "_NET_WM_STATE", "_NET_WM_STATE_STICKY");
+
+    let val :[u32; 1] = [0xFFFFFFFF];
+    let desktop = xcb::intern_atom(conn, false, "_NET_WM_DESKTOP").get_reply().unwrap().atom();
+    xcb::change_property(conn, xcb::PROP_MODE_REPLACE as u8, win, desktop,
+                         xcb::ATOM_CARDINAL, 32, &val);
 }
 
-unsafe fn add_atom(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong,
-                   name: *const c_char, value: *const c_char) {
-    mod_atom(xlib, dpy, win, name, value, xlib::PropModeAppend);
+fn draw_window() {
+    unsafe {
+        gl::ClearColor(0.5f32, 0.5f32, 1.0f32, 1.0f32);
+        gl::Clear(gl::COLOR_BUFFER_BIT);
+        gl::Flush();
+        check_gl_error();
+    }
 }
 
+fn main() { unsafe {
+    let (conn, screen_num) = xcb::Connection::connect_with_xlib_display().unwrap();
+    conn.set_event_queue_owner(xcb::EventQueueOwner::Xcb);
 
-unsafe fn set_atom(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong,
-                   name: *const c_char, value: *const c_char) {
-    mod_atom(xlib, dpy, win, name, value, xlib::PropModeReplace);
-}
-
-unsafe fn set_as_dock(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong) {
-    // First set the _NET_WM_PID
-    set_wm_pid(xlib, dpy, win);
-
-    set_atom(xlib, dpy, win, cstr!("_NET_WM_WINDOW_TYPE"), cstr!("_NET_WM_WINDOW_TYPE_DOCK"));
-    set_atom(xlib, dpy, win, cstr!("_NET_WM_STATE"), cstr!("_NET_WM_STATE_ABOVE"));
-    add_atom(xlib, dpy, win, cstr!("_NET_WM_STATE"), cstr!("_NET_WM_STATE_STICKY"));
-
-    let d: u32 = 0xffffffff;
-    (xlib.XChangeProperty)(dpy, win,
-                           (xlib.XInternAtom)(dpy, cstr!("_NET_WM_DESKTOP"), xlib::False),
-                           (xlib.XInternAtom)(dpy, cstr!("CARDINAL"), xlib::False),
-                           32, xlib::PropModeReplace, &d as *const u32 as *const c_uchar, 1);
-}
-
-//unsafe fn set_window_size(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong, width: c_int, height: c_int) {
-//    let mut changes : xlib::XWindowChanges = xlib::XWindowChanges { width: width, height: height, x: 0, y: 0, border_width: 0, sibling: 0, stack_mode: 0 };
-//    (xlib.XConfigureWindow)(dpy, win, (xlib::CWWidth | xlib::CWHeight) as u32, &mut changes as *mut xlib::XWindowChanges);
-//}
-//
-//unsafe fn set_window_position(xlib: &xlib::Xlib, dpy: *mut xlib::Display, win: c_ulong, x: c_int, y: c_int) {
-//    let mut changes : xlib::XWindowChanges = xlib::XWindowChanges { width: 0, height: 0, x: x, y: y, border_width: 0, sibling: 0, stack_mode: 0 };
-//    (xlib.XConfigureWindow)(dpy, win, (xlib::CWX | xlib::CWY) as u32, &mut changes as *mut xlib::XWindowChanges);
-//}
-
-unsafe extern fn handle_error(_: *mut xlib::Display, err: *mut xlib::XErrorEvent) -> i32 {
-    println!("Error {}: {}", (*err).type_, (*err).error_code);
-    return 0;
-}
-
-unsafe extern fn handle_io_error(_: *mut xlib::Display) -> i32 {
-    println!("IOError");
-    return 0;
-}
-
-unsafe fn create_xwin() {
-    let xlib = xlib::Xlib::open().unwrap();
-    let glx = glx::Glx::open().unwrap();
-    let dpy = (xlib.XOpenDisplay)(ptr::null());
-    let screen = (xlib.XDefaultScreen)(dpy);
-    let root = (xlib.XRootWindow)(dpy, screen);
-
-    (xlib.XSetErrorHandler)(Some(handle_error));
-    (xlib.XSetIOErrorHandler)(Some(handle_io_error));
-
-    // Hook close requests
-    let wm_protocols = (xlib.XInternAtom)(dpy, cstr!("WM_PROTOCOLS"), xlib::False);
-    let wm_delete_window = (xlib.XInternAtom)(dpy, cstr!("WM_DELETE_WINDOW"), xlib::False);
-
-    let mut attribs = [
-        glx::GLX_RGBA, glx::GLX_DOUBLEBUFFER, 0,
-        glx::GLX_DEPTH_SIZE, 24,
-        glx::GLX_STENCIL_SIZE, 8,
-        glx::GLX_RED_SIZE, 8,
-        glx::GLX_BLUE_SIZE, 8,
-        glx::GLX_GREEN_SIZE, 8,
-    ];
-    let visual = (glx.glXChooseVisual)(dpy, 0, attribs.as_mut_ptr());
-
-    if visual.is_null() {
-        println!("Couldn't get the visual");
-        return;
+    if glx_dec_version(conn.get_raw_dpy()) < 13 {
+        panic!("glx-1.3 is not supported");
     }
 
-    let mut attrs = xlib::XSetWindowAttributes {
-        background_pixmap: 0,
-        border_pixmap: 0,
-        bit_gravity: 0,
-        win_gravity: 0,
-        backing_store: 0,
-        backing_planes: 0,
-        backing_pixel: 0,
-        save_under: 0,
-        do_not_propagate_mask: 0,
-        cursor: 0,
+    let fbc = get_glxfbconfig(conn.get_raw_dpy(), screen_num, &[
+            GLX_X_RENDERABLE    , 1,
+            GLX_DRAWABLE_TYPE   , GLX_WINDOW_BIT,
+            GLX_RENDER_TYPE     , GLX_RGBA_BIT,
+            GLX_X_VISUAL_TYPE   , GLX_TRUE_COLOR,
+            GLX_RED_SIZE        , 8,
+            GLX_GREEN_SIZE      , 8,
+            GLX_BLUE_SIZE       , 8,
+            GLX_ALPHA_SIZE      , 8,
+            GLX_DEPTH_SIZE      , 24,
+            GLX_STENCIL_SIZE    , 8,
+            GLX_DOUBLEBUFFER    , 1,
+            0
+    ]);
 
-        background_pixel: (xlib.XWhitePixel)(dpy, screen),
-        border_pixel: (xlib.XBlackPixel)(dpy, screen),
-        event_mask: xlib::ExposureMask,
-        override_redirect: 1,
-        colormap: (xlib.XCreateColormap)(dpy, root, (*visual).visual , xlib::AllocNone)
+    let vi: *const xlib::XVisualInfo =
+            glXGetVisualFromFBConfig(conn.get_raw_dpy(), fbc);
+
+    let dri2_ev = {
+        conn.prefetch_extension_data(dri2::id());
+        match conn.get_extension_data(dri2::id()) {
+            None => { panic!("could not load dri2 extension") },
+            Some(r) => { r.first_event() }
+        }
     };
 
-    let win = (xlib.XCreateWindow)(dpy, root, 0, 0, 1024, 20, 0, (*visual).depth,
-                                   xlib::InputOutput as u32, (*visual).visual,
-                                   xlib::CWBackPixel | xlib::CWColormap | xlib::CWBorderPixel | xlib::CWEventMask,
-                                   &mut attrs as *mut xlib::XSetWindowAttributes);
-    if win <= 0 {
-        println!("Couldn't create glx window");
-        return;
+    let (wm_protocols, wm_delete_window) = {
+        let pc = xcb::intern_atom(&conn, false, "WM_PROTOCOLS");
+        let dwc = xcb::intern_atom(&conn, false, "WM_DELETE_WINDOW");
+
+        let p = match pc.get_reply() {
+            Ok(p) => p.atom(),
+            Err(_) => panic!("could not load WM_PROTOCOLS atom")
+        };
+        let dw = match dwc.get_reply() {
+            Ok(dw) => dw.atom(),
+            Err(_) => panic!("could not load WM_DELETE_WINDOW atom")
+        };
+        (p, dw)
+    };
+
+    let setup = conn.get_setup();
+    let screen = setup.roots().nth((*vi).screen as usize).unwrap();
+
+    let cmap = conn.generate_id();
+    let win = conn.generate_id();
+
+    xcb::create_colormap(&conn, xcb::COLORMAP_ALLOC_NONE as u8,
+            cmap, screen.root(), (*vi).visualid as u32);
+
+    let cw_values = [
+        (xcb::CW_BACK_PIXEL, screen.white_pixel()),
+        (xcb::CW_BORDER_PIXEL, screen.black_pixel()),
+        (xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE),
+        (xcb::CW_COLORMAP, cmap)
+    ];
+
+    xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(), 0, 0, 1280, 20,
+            0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
+            (*vi).visualid as u32, &cw_values);
+
+    xlib::XFree(vi as *mut c_void);
+
+    set_dock(&conn, win);
+
+    let title = "ongybar";
+    xcb::change_property(&conn,
+            xcb::PROP_MODE_REPLACE as u8,
+            win,
+            xcb::ATOM_WM_NAME,
+            xcb::ATOM_STRING,
+            8, title.as_bytes());
+
+    let protocols = [wm_delete_window];
+    xcb::change_property(&conn, xcb::PROP_MODE_REPLACE as u8,
+            win, wm_protocols, xcb::ATOM_ATOM, 32, &protocols);
+
+    xcb::map_window(&conn, win);
+    conn.flush();
+    xlib::XSync(conn.get_raw_dpy(), xlib::False);
+
+    let glx_exts = CStr::from_ptr(
+        glXQueryExtensionsString(conn.get_raw_dpy(), screen_num))
+        .to_str().unwrap();
+
+    if !check_glx_extension(&glx_exts, "GLX_ARB_create_context") {
+        panic!("could not find GLX extension GLX_ARB_create_context");
     }
 
-    set_as_dock(&xlib, dpy, win);
+    // with glx, no need of a current context is needed to load symbols
+    // otherwise we would need to create a temporary legacy GL context
+    // for loading symbols (at least glXCreateContextAttribsARB)
+    let glx_create_context_attribs: GlXCreateContextAttribsARBProc =
+        std::mem::transmute(load_gl_func("glXCreateContextAttribsARB"));
 
-    let cxt = (glx.glXCreateContext)(dpy, visual, ptr::null_mut(), 1);
-    if cxt.is_null() {
-        println!("Couldn't create context");
-        return;
+    // loading all other symbols
+    gl::load_with(|n| load_gl_func(&n));
+
+    if !gl::GenVertexArrays::is_loaded() {
+        panic!("no GL3 support available!");
     }
-    (glx.glXMakeCurrent)(dpy, win, cxt);
 
-    gl::load_with(|s| {
-        let cstr = std::ffi::CString::new(s).unwrap();
-        let ret = (glx.glXGetProcAddress)(cstr.as_ptr() as *const u8);
+    // installing an event handler to check if error is generated
+    ctx_error_occurred = false;
+    let old_handler = xlib::XSetErrorHandler(Some(ctx_error_handler));
 
-        return ret.unwrap() as *const std::os::raw::c_void;
-    });
+    let context_attribs: [c_int; 5] = [
+        GLX_CONTEXT_MAJOR_VERSION_ARB as c_int, 3,
+        GLX_CONTEXT_MINOR_VERSION_ARB as c_int, 0,
+        0
+    ];
+    let ctx = glx_create_context_attribs(conn.get_raw_dpy(), fbc, null_mut(),
+            xlib::True, &context_attribs[0] as *const c_int);
 
-    let vendor = gl::GetString(gl::VENDOR);
-    let cstr = std::ffi::CString::from_raw(vendor as *mut i8);
-    println!("{}", cstr.into_string().unwrap());
+    conn.flush();
+    xlib::XSync(conn.get_raw_dpy(), xlib::False);
+    xlib::XSetErrorHandler(std::mem::transmute(old_handler));
 
-    // Set window title
-    (xlib.XStoreName)(dpy, win, cstr!("ongybar"));
+    if ctx.is_null() || ctx_error_occurred {
+        panic!("error when creating gl-3.0 context");
+    }
 
-    let mut protocols = [wm_delete_window];
-    (xlib.XSetWMProtocols)(dpy, win, protocols.as_mut_ptr(), protocols.len() as c_int);
-
-    (xlib.XMapRaised)(dpy, win);
-
-    let mut event: xlib::XEvent = mem::uninitialized();
+    if glXIsDirect(conn.get_raw_dpy(), ctx) == 0 {
+        panic!("obtained indirect rendering context")
+    }
 
     loop {
-        (xlib.XNextEvent)(dpy, &mut event);
+        if let Some(ev) = conn.wait_for_event() {
+            let ev_type = ev.response_type() & !0x80;
+            match ev_type {
+                xcb::EXPOSE => {
+                    glXMakeCurrent(conn.get_raw_dpy(), win as xlib::XID, ctx);
+                    draw_window();
+                    glXSwapBuffers(conn.get_raw_dpy(), win as xlib::XID);
+                    glXMakeCurrent(conn.get_raw_dpy(), 0, null_mut());
+                },
+                xcb::KEY_PRESS => {
+                    break;
+                },
+                xcb::CLIENT_MESSAGE => {
+                    let cmev = xcb::cast_event::<xcb::ClientMessageEvent>(&ev);
+                    if cmev.type_() == wm_protocols && cmev.format() == 32 {
+                        let protocol = cmev.data().data32()[0];
+                        if protocol == wm_delete_window {
+                            break;
+                        }
+                    }
+                },
+                _ => {
+                    // following stuff is not obvious at all, but is necessary
+                    // to handle GL when XCB owns the event queue
+                    if ev_type == dri2_ev || ev_type == dri2_ev+1 {
+                        // these are libgl dri2 event that need special handling
+                        // see https://bugs.freedesktop.org/show_bug.cgi?id=35945#c4
+                        // and mailing thread starting here:
+                        // http://lists.freedesktop.org/archives/xcb/2015-November/010556.html
 
-        match event.get_type() {
-            xlib::ClientMessage => {
-                let xclient = xlib::XClientMessageEvent::from(event);
+                        if let Some(proc_) =
+                                xlib::XESetWireToEvent(conn.get_raw_dpy(),
+                                        ev_type as i32, None) {
+                            xlib::XESetWireToEvent(conn.get_raw_dpy(),
+                                    ev_type as i32, Some(proc_));
+                            let raw_ev = ev.ptr;
+                            (*raw_ev).sequence =
+                                xlib::XLastKnownRequestProcessed(
+                                        conn.get_raw_dpy()) as u16;
+                            let mut dummy: xlib::XEvent = std::mem::zeroed();
+                            proc_(conn.get_raw_dpy(),
+                                &mut dummy as *mut xlib::XEvent,
+                                raw_ev as *mut xlib::xEvent);
+                        }
 
-                if xclient.message_type == wm_protocols && xclient.format == 32 {
-                    let protocol = xclient.data.get_long(0) as xlib::Atom;
-                    if protocol == wm_delete_window {
-                        break;
                     }
                 }
-            }, 
-            _ => ()
+            }
+            conn.flush();
+        }
+        else {
+            break;
         }
     }
 
-    (xlib.XCloseDisplay)(dpy);
-}
+    // only to make sure that rs_client generate correct names for DRI2
+    // (used to be "*_DRI_2_*")
+    // should be in a "compile tests" section instead of example
+    let _ = xcb::ffi::dri2::XCB_DRI2_ATTACHMENT_BUFFER_ACCUM;
 
-fn main() {
-    unsafe {
-        create_xwin();
-    }
-}
+    glXDestroyContext(conn.get_raw_dpy(), ctx);
+
+    xcb::unmap_window(&conn, win);
+    xcb::destroy_window(&conn, win);
+    xcb::free_colormap(&conn, cmap);
+    conn.flush();
+}}
