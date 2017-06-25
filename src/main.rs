@@ -5,6 +5,8 @@ extern crate gl;
 extern crate libc;
 extern crate byteorder;
 extern crate hostname;
+extern crate graphics;
+extern crate opengl_graphics;
 
 use xcb::dri2;
 
@@ -15,8 +17,6 @@ use std::os::raw::*;
 use std::ptr::null_mut;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_int, c_void};
-
-use byteorder::WriteBytesExt;
 
 
 const GLX_CONTEXT_MAJOR_VERSION_ARB: u32 = 0x2091;
@@ -48,11 +48,11 @@ fn check_glx_extension(glx_exts: &str, ext_name: &str) -> bool {
     false
 }
 
-static mut ctx_error_occurred: bool = false;
+static mut CTX_ERROR_OCCURED: bool = false;
 unsafe extern "C" fn ctx_error_handler(
         _dpy: *mut xlib::Display,
         _ev: *mut xlib::XErrorEvent) -> i32 {
-    ctx_error_occurred = true;
+    CTX_ERROR_OCCURED = true;
     0
 }
 
@@ -144,11 +144,24 @@ unsafe fn set_dock(conn: &xcb::Connection, win: c_uint) {
                          xcb::ATOM_CARDINAL, 32, &val);
 }
 
-fn draw_window() {
+fn draw_window(graphics : &mut opengl_graphics::GlGraphics) {
+    println!("Drawing window");
     unsafe {
-        gl::ClearColor(0.5f32, 0.5f32, 1.0f32, 1.0f32);
-        gl::Clear(gl::COLOR_BUFFER_BIT);
-        gl::Flush();
+        //graphics.viewport(0, 0, 1280, 20);
+
+        //let rect = graphics::rectangle::rectangle_by_corners(-5f64, 5f64, 5f64, -5f64);
+        graphics::clear([0.0f32, 1.0f32, 0.0f32, 1.0f32], graphics);
+
+        let mut viewport = [1; 4];
+        gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
+        println!("{:?}", viewport);
+
+
+        graphics::rectangle(graphics::color::WHITE, //[1.0f32, 0.0f32, 0.0f32, 1.0f32],
+                            [0.0f64, 0.0f64, 100.0f64, 10.0f64], //rect,
+                            graphics::math::identity(),
+                            graphics);
+
         check_gl_error();
     }
 }
@@ -264,7 +277,7 @@ fn main() { unsafe {
     }
 
     // installing an event handler to check if error is generated
-    ctx_error_occurred = false;
+    CTX_ERROR_OCCURED = false;
     let old_handler = xlib::XSetErrorHandler(Some(ctx_error_handler));
 
     let context_attribs: [c_int; 5] = [
@@ -279,7 +292,7 @@ fn main() { unsafe {
     xlib::XSync(conn.get_raw_dpy(), xlib::False);
     xlib::XSetErrorHandler(std::mem::transmute(old_handler));
 
-    if ctx.is_null() || ctx_error_occurred {
+    if ctx.is_null() || CTX_ERROR_OCCURED {
         panic!("error when creating gl-3.0 context");
     }
 
@@ -287,15 +300,18 @@ fn main() { unsafe {
         panic!("obtained indirect rendering context")
     }
 
+    glXMakeCurrent(conn.get_raw_dpy(), win as xlib::XID, ctx);
+
+    let mut graphics = opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V4_5);
+
     loop {
         if let Some(ev) = conn.wait_for_event() {
             let ev_type = ev.response_type() & !0x80;
             match ev_type {
                 xcb::EXPOSE => {
-                    glXMakeCurrent(conn.get_raw_dpy(), win as xlib::XID, ctx);
-                    draw_window();
+                    draw_window(&mut graphics);
                     glXSwapBuffers(conn.get_raw_dpy(), win as xlib::XID);
-                    glXMakeCurrent(conn.get_raw_dpy(), 0, null_mut());
+    //                glXMakeCurrent(conn.get_raw_dpy(), 0, null_mut());
                 },
                 xcb::KEY_PRESS => {
                     break;
