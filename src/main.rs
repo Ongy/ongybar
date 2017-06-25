@@ -147,22 +147,32 @@ unsafe fn set_dock(conn: &xcb::Connection, win: c_uint) {
 fn draw_window(graphics : &mut opengl_graphics::GlGraphics) {
     println!("Drawing window");
     unsafe {
+//        let mut viewport = [1; 4];
+//        gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
+        let viewport = graphics::Viewport { rect: [0, 0, 1280, 20], draw_size: [1280, 20], window_size: [1280, 20] };
+        graphics.draw(viewport, |_, g| {
+            graphics::clear(graphics::color::WHITE, g);
+            graphics::rectangle(graphics::color::BLACK,
+                                [0.0f64, 0.0f64, 1280.0f64, 20.0f64], //rect,
+                                graphics::math::identity(),
+                                g);
+        });
         //graphics.viewport(0, 0, 1280, 20);
 
         //let rect = graphics::rectangle::rectangle_by_corners(-5f64, 5f64, 5f64, -5f64);
-        graphics::clear([0.0f32, 1.0f32, 0.0f32, 1.0f32], graphics);
-
-        let mut viewport = [1; 4];
-        gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
-        println!("{:?}", viewport);
-
-
-        graphics::rectangle(graphics::color::WHITE, //[1.0f32, 0.0f32, 0.0f32, 1.0f32],
-                            [0.0f64, 0.0f64, 100.0f64, 10.0f64], //rect,
-                            graphics::math::identity(),
-                            graphics);
-
-        check_gl_error();
+//        graphics::clear([0.0f32, 1.0f32, 0.0f32, 1.0f32], graphics);
+//
+//        let mut viewport = [1; 4];
+//        gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
+//        println!("{:?}", viewport);
+//
+//
+//        graphics::rectangle(graphics::color::WHITE, //[1.0f32, 0.0f32, 0.0f32, 1.0f32],
+//                            [0.0f64, 0.0f64, 100.0f64, 10.0f64], //rect,
+//                            graphics::math::identity(),
+//                            graphics);
+//
+//        check_gl_error();
     }
 }
 
@@ -301,6 +311,14 @@ fn main() { unsafe {
     }
 
     glXMakeCurrent(conn.get_raw_dpy(), win as xlib::XID, ctx);
+
+    let mut major = [1];
+    let mut minor = [1];
+
+    gl::GetIntegerv(gl::MAJOR_VERSION, major.as_mut_ptr());
+    gl::GetIntegerv(gl::MINOR_VERSION, minor.as_mut_ptr());
+
+    println!("{}.{}", major[0], minor[0]);
 
     let mut graphics = opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V4_5);
 
