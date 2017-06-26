@@ -18,6 +18,8 @@ use std::ptr::null_mut;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_int, c_void};
 
+use graphics::Transformed;
+use graphics::character::CharacterCache;
 
 const GLX_CONTEXT_MAJOR_VERSION_ARB: u32 = 0x2091;
 const GLX_CONTEXT_MINOR_VERSION_ARB: u32 = 0x2092;
@@ -144,35 +146,51 @@ unsafe fn set_dock(conn: &xcb::Connection, win: c_uint) {
                          xcb::ATOM_CARDINAL, 32, &val);
 }
 
-fn draw_window(graphics : &mut opengl_graphics::GlGraphics) {
+fn draw_text(graphics: &mut opengl_graphics::GlGraphics, height: u32,
+             cache: &mut opengl_graphics::glyph_cache::GlyphCache,
+             trans: &graphics::math::Matrix2d, msg: &str) -> f64 {
+    let text_height = (height - 2) / 3 * 2;
+    graphics::text([0.8f32, 0.8f32, 0.8f32, 1.0f32], text_height,
+                   msg, cache, trans.trans(0f64, text_height as f64 + 2f64),
+                   graphics);
+
+    return cache.width(text_height, msg);
+}
+
+fn draw_text_right(graphics: &mut opengl_graphics::GlGraphics, height: u32,
+                   cache: &mut opengl_graphics::glyph_cache::GlyphCache,
+                   trans: &graphics::math::Matrix2d, msg: &str) -> f64 {
+    let text_height = (height - 2) / 3 * 2;
+    let text_width = cache.width(text_height, msg);
+
+    return draw_text(graphics, height, cache, &trans.trans(-text_width, 0f64), msg);
+}
+
+fn draw_seperator_right(graphics: &mut opengl_graphics::GlGraphics, height: u32,
+                        trans: graphics::math::Matrix2d) {
+    graphics::line([0.8f32, 0.8f32, 0.8f32, 1.0f32], 0.2f64,
+                   [0f64, 3f64, 0f64, height as f64 - 3f64],
+                   trans, graphics);
+}
+
+//fn draw_string_list(graphics
+
+fn draw_window(graphics : &mut opengl_graphics::GlGraphics, width: u32, height: u32) {
     println!("Drawing window");
     unsafe {
-//        let mut viewport = [1; 4];
-//        gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
-        let viewport = graphics::Viewport { rect: [0, 0, 1280, 20], draw_size: [1280, 20], window_size: [1280, 20] };
-        graphics.draw(viewport, |_, g| {
-            graphics::clear(graphics::color::WHITE, g);
-            graphics::rectangle(graphics::color::BLACK,
-                                [0.0f64, 0.0f64, 1280.0f64, 20.0f64], //rect,
-                                graphics::math::identity(),
-                                g);
+        let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
+        let viewport = graphics::Viewport { rect: [0, 0, width as i32, height as i32],
+                                            draw_size: [width, height],
+                                            window_size: [width, height] };
+        graphics.draw(viewport, |c, g| {
+            graphics::clear(graphics::color::BLACK, g);
+            let border = width as f64 - 5f64;
+            let nd = border - draw_text_right(g, height, &mut glyphs, &c.transform.trans(border, 0f64), "26.06 10:56:30");
+            draw_seperator_right(g, height, c.transform.trans(nd - 4f64, 0f64));
+            draw_text_right(g, height, &mut glyphs, &c.transform.trans(nd - 9f64, 0f64), "52%  1:14");
         });
-        //graphics.viewport(0, 0, 1280, 20);
 
-        //let rect = graphics::rectangle::rectangle_by_corners(-5f64, 5f64, 5f64, -5f64);
-//        graphics::clear([0.0f32, 1.0f32, 0.0f32, 1.0f32], graphics);
-//
-//        let mut viewport = [1; 4];
-//        gl::GetIntegerv(gl::VIEWPORT, viewport.as_mut_ptr());
-//        println!("{:?}", viewport);
-//
-//
-//        graphics::rectangle(graphics::color::WHITE, //[1.0f32, 0.0f32, 0.0f32, 1.0f32],
-//                            [0.0f64, 0.0f64, 100.0f64, 10.0f64], //rect,
-//                            graphics::math::identity(),
-//                            graphics);
-//
-//        check_gl_error();
+        check_gl_error();
     }
 }
 
@@ -241,9 +259,13 @@ fn main() { unsafe {
         (xcb::CW_COLORMAP, cmap)
     ];
 
-    xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(), 0, 0, 1280, 20,
-            0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
-            (*vi).visualid as u32, &cw_values);
+    let width = 1366;
+    let height = 18;
+
+    xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(),
+                       0, 0, width, height,
+                       0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
+                       (*vi).visualid as u32, &cw_values);
 
     xlib::XFree(vi as *mut c_void);
 
@@ -320,14 +342,14 @@ fn main() { unsafe {
 
     println!("{}.{}", major[0], minor[0]);
 
-    let mut graphics = opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V4_5);
+    let mut graphics = opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0);
 
     loop {
         if let Some(ev) = conn.wait_for_event() {
             let ev_type = ev.response_type() & !0x80;
             match ev_type {
                 xcb::EXPOSE => {
-                    draw_window(&mut graphics);
+                    draw_window(&mut graphics, width as u32, height as u32);
                     glXSwapBuffers(conn.get_raw_dpy(), win as xlib::XID);
     //                glXMakeCurrent(conn.get_raw_dpy(), 0, null_mut());
                 },
