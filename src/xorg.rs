@@ -417,7 +417,6 @@ pub fn do_x11main<F>(mut draw_window: F)
             poll.poll(&mut events, None).unwrap();
 
             for event in events.iter() {
-                println!("Got some event o.0");
                 match event.token() {
                     XCB => {
                         if !wait_event(&win, &mut graphics, &mut draw_window) {
