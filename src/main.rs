@@ -17,6 +17,7 @@ use std::cell::RefCell;
 use std::collections::linked_list::LinkedList;
 use std::ops::DerefMut;
 use std::os::raw::*;
+use std::rc::Rc;
 
 trait Renderable<G, C> {
     fn get_size(&self, cache: &mut C, height: u32) -> f64;
@@ -120,7 +121,7 @@ fn draw_window(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
 fn read_stdin(str_list: &RefCell<LinkedList<String>>) -> bool {
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer);
-    str_list.borrow_mut().deref_mut().push_back(buffer);
+    str_list.borrow_mut().deref_mut().push_back(String::from(buffer.trim()));
 
     return true;
 }
@@ -132,11 +133,12 @@ fn main() {
     list.push_back(String::from("This is date"));
     list.push_back(String::from("This is ram usage"));
 
-    let list_cell = RefCell::new(list);
+    let list_cell = Rc::new(RefCell::new(list));
 
     {
         let mut fun_list = LinkedList::new();
-        fun_list.push_back((0 as c_int, Box::new(|| read_stdin(&list_cell)) as Box<FnMut() -> bool>));
+        let cell_cpy = list_cell.clone();
+        fun_list.push_back((0 as c_int, Box::new(move || read_stdin(&cell_cpy)) as Box<FnMut() -> bool>));
 
         xorg::do_x11main(|g, w, h| {
                              let mut l = list_cell.borrow_mut();
