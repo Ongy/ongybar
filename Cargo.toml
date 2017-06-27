@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Markus Ongyerth <ongy@ongy.net>"]
 
 [dependencies]
+mio = "0.6"
 byteorder = "1.0.0"
 hostname = "0.1.3"
 libc = "0.2.24"
