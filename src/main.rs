@@ -12,9 +12,11 @@ extern crate opengl_graphics;
 
 mod xorg;
 
-use std::collections::linked_list::LinkedList;
 use graphics::Transformed;
-use graphics::character::CharacterCache;
+use std::cell::RefCell;
+use std::collections::linked_list::LinkedList;
+use std::ops::DerefMut;
+use std::os::raw::*;
 
 trait Renderable<G, C> {
     fn get_size(&self, cache: &mut C, height: u32) -> f64;
@@ -115,6 +117,14 @@ fn draw_window(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
     });
 }
 
+fn read_stdin(str_list: &RefCell<LinkedList<String>>) -> bool {
+    let mut buffer = String::new();
+    std::io::stdin().read_line(&mut buffer);
+    str_list.borrow_mut().deref_mut().push_back(buffer);
+
+    return true;
+}
+
 fn main() {
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
     let mut list :LinkedList<String> = LinkedList::new();
@@ -122,5 +132,15 @@ fn main() {
     list.push_back(String::from("This is date"));
     list.push_back(String::from("This is ram usage"));
 
-    xorg::do_x11main(|g, w, h| draw_window(&mut glyphs, &list, g, w, h));
+    let list_cell = RefCell::new(list);
+
+    {
+        let mut fun_list = LinkedList::new();
+        fun_list.push_back((0 as c_int, Box::new(|| read_stdin(&list_cell)) as Box<FnMut() -> bool>));
+
+        xorg::do_x11main(|g, w, h| {
+                             let mut l = list_cell.borrow_mut();
+                             draw_window(&mut glyphs, l.deref_mut(), g, w, h); },
+                         fun_list.into_iter());
+    }
 }

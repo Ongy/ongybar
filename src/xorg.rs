@@ -8,11 +8,16 @@ use libc;
 
 use opengl_graphics;
 
+use std::ops::DerefMut;
+
 use x11::xlib;
 use x11::glx::*;
 
 use std;
+use std::boxed::Box;
+use std::cell::RefCell;
 use std::os::raw::*;
+use std::collections::HashMap;
 use std::ptr::null_mut;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_int, c_void};
@@ -314,10 +319,12 @@ unsafe fn make_glcontext(win: &X11Window, fbc: *mut __GLXFBConfigRec) -> (*mut _
     return (ctx, opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0));
 }
 
+static mut RUN: bool = true;
+
 unsafe fn handle_event<F>(win: &X11Window,
                           graphics: &mut opengl_graphics::GlGraphics,
                           draw_window: &mut F,
-                          ev: xcb::Event<xcb::ffi::xcb_generic_event_t>) -> bool
+                          ev: xcb::Event<xcb::ffi::xcb_generic_event_t>)
         where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
 
     let ev_type = ev.response_type() & !0x80;
@@ -327,14 +334,14 @@ unsafe fn handle_event<F>(win: &X11Window,
             glXSwapBuffers(win.conn.get_raw_dpy(), win.win as xlib::XID);
         },
         xcb::KEY_PRESS => {
-            return false;
+            RUN = false;
         },
         xcb::CLIENT_MESSAGE => {
             let cmev = xcb::cast_event::<xcb::ClientMessageEvent>(&ev);
             if cmev.type_() == win.wm_protocols && cmev.format() == 32 {
                 let protocol = cmev.data().data32()[0];
                 if protocol == win.wm_delete_window {
-                    return false;
+                    RUN = false;
                 }
             }
         },
@@ -366,19 +373,15 @@ unsafe fn handle_event<F>(win: &X11Window,
         }
     }
     win.conn.flush();
-
-    return true
 }
 
 unsafe fn poll_event<F>(win: &X11Window,
                         graphics: &mut opengl_graphics::GlGraphics,
-                        draw_window: &mut F) -> bool
+                        draw_window: &mut F)
         where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
     if let Some(ev) = win.conn.poll_for_event() {
-        return handle_event(win, graphics, draw_window, ev);
+        handle_event(win, graphics, draw_window, ev);
     }
-
-    return true;
 }
 
 unsafe fn wait_event<F>(win: &X11Window,
@@ -386,17 +389,21 @@ unsafe fn wait_event<F>(win: &X11Window,
                         draw_window: &mut F) -> bool
         where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
     if let Some(ev) = win.conn.wait_for_event() {
-        return handle_event(win, graphics, draw_window, ev);
+        handle_event(win, graphics, draw_window, ev);
     }
 
     return false;
 }
 
-pub fn do_x11main<F>(mut draw_window: F)
-    where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
+pub fn do_x11main<F, G>(draw_window: F, fun_list: G)
+    where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32),
+          G: std::iter::IntoIterator<Item=(c_int, Box<FnMut() -> bool>)> {
     unsafe {
         let (win, fbc) = create_window();
-        let (ctx, mut graphics) = make_glcontext(&win, fbc);
+        let (ctx, graphics) = make_glcontext(&win, fbc);
+
+        let graphics_cell = RefCell::new(graphics);
+        let fun_cell = RefCell::new(draw_window);
 
         let xcb_fd: c_int = xcb::ffi::base::xcb_get_file_descriptor(win.conn.get_raw_conn());
 
@@ -407,28 +414,37 @@ pub fn do_x11main<F>(mut draw_window: F)
                       XCB, Ready::readable(),
                       PollOpt::level()).unwrap();
 
+        let mut map = HashMap::new();
+        map.insert(XCB, Box::new(||  {
+            wait_event(&win, graphics_cell.borrow_mut().deref_mut(), fun_cell.borrow_mut().deref_mut());
+            return false;
+        }) as Box<FnMut() -> bool>);
+
+        for x in fun_list {
+            let tok = Token(x.0 as usize);
+            poll.register(&mio::unix::EventedFd(&x.0), tok, Ready::readable(),
+                          PollOpt::level()).unwrap();
+            map.insert(tok, x.1);
+        }
+
         let mut events = Events::with_capacity(1024);
 
-        let mut run = true;
-
+        RUN = true;
         println!("Going into X loop");
         loop {
-            poll_event(&win, &mut graphics, &mut draw_window);
+            poll_event(&win, graphics_cell.borrow_mut().deref_mut(), fun_cell.borrow_mut().deref_mut());
             poll.poll(&mut events, None).unwrap();
 
             for event in events.iter() {
-                match event.token() {
-                    XCB => {
-                        if !wait_event(&win, &mut graphics, &mut draw_window) {
-                            run = false;
-                            break;
-                        }
-                    }
-                    Token(_) => { run = false; break; }
+                let mut fun = map.get_mut(&event.token()).unwrap();
+                if fun.deref_mut()() {
+                    let mut draw_fun = fun_cell.borrow_mut();
+                    draw_fun.deref_mut()(graphics_cell.borrow_mut().deref_mut(), win.width, win.height);
+                    glXSwapBuffers(win.conn.get_raw_dpy(), win.win as xlib::XID);
                 }
             }
 
-            if !run {
+            if !RUN {
                 break;
             }
         }
