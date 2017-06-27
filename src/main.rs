@@ -74,11 +74,10 @@ fn draw_seperator<G>(graphics: &mut G, height: u32,
                    trans.trans(0f64, 0f64), graphics);
 }
 
-fn draw_text_list<'a, I, G, C>(graphics: &mut G, height: u32,
-                  cache: &mut C,
-                  trans: &graphics::math::Matrix2d, strs: I) -> f64
-    where G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
-          C: graphics::character::CharacterCache,
+fn draw_text_list<'a, C, G, I>(graphics: &mut G, height: u32, cache: &mut C,
+                               trans: &graphics::math::Matrix2d, strs: I) -> f64
+    where C: graphics::character::CharacterCache,
+          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
           I: std::iter::Iterator<Item=&'a String> {
     let mut total_offset = 0f64;
     let mut cur_trans = trans.trans(0f64, 0f64);
@@ -92,7 +91,7 @@ fn draw_text_list<'a, I, G, C>(graphics: &mut G, height: u32,
         }
 
         x.do_render(graphics, height, &cur_trans, cache); //draw_text(graphics, height, cache, &cur_trans, x.as_str());
-        let offset = 5f64; //<String as Renderable<G, C>>::get_size(x, cache, height);
+        let offset = <String as Renderable<G, C>>::get_size(x, cache, height);
         cur_trans = cur_trans.trans(offset, 0f64);
         total_offset += offset;
     }
@@ -100,7 +99,7 @@ fn draw_text_list<'a, I, G, C>(graphics: &mut G, height: u32,
     return total_offset;
 }
 
-fn draw_window(mut glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
+fn draw_window(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
                source: &LinkedList<String>,
                graphics : &mut opengl_graphics::GlGraphics,
                width: u32, height: u32) {
@@ -112,7 +111,7 @@ fn draw_window(mut glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
                                         window_size: [width, height] };
     graphics.draw(viewport, |c, g| {
         graphics::clear(graphics::color::BLACK, g);
-        draw_text_list(g, height, &mut glyphs, &c.transform, source.iter());
+        draw_text_list(g, height, glyphs, &c.transform, source.iter());
     });
 }
 
