@@ -6,8 +6,6 @@ use hostname;
 
 use libc;
 
-use opengl_graphics;
-
 use std::ops::DerefMut;
 
 use x11::xlib;
@@ -260,7 +258,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
     return (win, fbc);
 }
 
-unsafe fn make_glcontext(win: &X11Window, fbc: *mut __GLXFBConfigRec) -> (*mut __GLXcontextRec, opengl_graphics::GlGraphics) {
+unsafe fn make_glcontext(win: &X11Window, fbc: *mut __GLXFBConfigRec) -> *mut __GLXcontextRec {
     let glx_exts = CStr::from_ptr(
         glXQueryExtensionsString(win.conn.get_raw_dpy(), win.screen_num))
         .to_str().unwrap();
@@ -316,16 +314,16 @@ unsafe fn make_glcontext(win: &X11Window, fbc: *mut __GLXFBConfigRec) -> (*mut _
 
     println!("{}.{}", major[0], minor[0]);
 
-    return (ctx, opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0));
+    return ctx;
 }
 
 static mut RUN: bool = true;
 
-unsafe fn handle_event<F>(win: &X11Window,
-                          graphics: &mut opengl_graphics::GlGraphics,
+unsafe fn handle_event<F, G>(win: &X11Window,
+                          graphics: &mut G,
                           draw_window: &mut F,
                           ev: xcb::Event<xcb::ffi::xcb_generic_event_t>)
-        where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
+        where F: FnMut(&mut G, u32, u32) {
 
     let ev_type = ev.response_type() & !0x80;
     match ev_type {
@@ -375,19 +373,19 @@ unsafe fn handle_event<F>(win: &X11Window,
     win.conn.flush();
 }
 
-unsafe fn poll_event<F>(win: &X11Window,
-                        graphics: &mut opengl_graphics::GlGraphics,
+unsafe fn poll_event<F, G>(win: &X11Window,
+                        graphics: &mut G,
                         draw_window: &mut F)
-        where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
+        where F: FnMut(&mut G, u32, u32) {
     if let Some(ev) = win.conn.poll_for_event() {
         handle_event(win, graphics, draw_window, ev);
     }
 }
 
-unsafe fn wait_event<F>(win: &X11Window,
-                        graphics: &mut opengl_graphics::GlGraphics,
+unsafe fn wait_event<F, G>(win: &X11Window,
+                        graphics: &mut G,
                         draw_window: &mut F) -> bool
-        where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32) {
+        where F: FnMut(&mut G, u32, u32) {
     if let Some(ev) = win.conn.wait_for_event() {
         handle_event(win, graphics, draw_window, ev);
     }
@@ -395,12 +393,14 @@ unsafe fn wait_event<F>(win: &X11Window,
     return false;
 }
 
-pub fn do_x11main<F, G>(draw_window: F, fun_list: G)
-    where F: FnMut(&mut opengl_graphics::GlGraphics, u32, u32),
+pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G)
+    where F: FnMut(&mut V, u32, u32),
+          L: FnOnce() -> V,
           G: std::iter::IntoIterator<Item=(c_int, Box<FnMut() -> bool>)> {
     unsafe {
         let (win, fbc) = create_window();
-        let (ctx, graphics) = make_glcontext(&win, fbc);
+        let ctx = make_glcontext(&win, fbc);
+        let graphics = create();
 
         let graphics_cell = RefCell::new(graphics);
         let fun_cell = RefCell::new(draw_window);

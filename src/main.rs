@@ -125,6 +125,7 @@ fn main() {
         xorg::do_x11main(|g, w, h| {
                              let mut l = list_cell.borrow_mut();
                              draw_window(&mut glyphs, l.deref_mut(), g, w, h); },
+                         || opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0),
                          fun_list.into_iter());
     }
 }
