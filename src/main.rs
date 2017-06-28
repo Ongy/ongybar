@@ -13,6 +13,7 @@ extern crate opengl_graphics;
 mod xorg;
 
 use graphics::Transformed;
+use std::boxed::Box;
 use std::cell::RefCell;
 use std::collections::linked_list::LinkedList;
 use std::ops::DerefMut;
@@ -41,33 +42,22 @@ impl<G, C> Renderable<G, C> for String
     }
 }
 
+struct Separator;
 
-//fn draw_text(graphics: &mut opengl_graphics::GlGraphics, height: u32,
-//             cache: &mut opengl_graphics::glyph_cache::GlyphCache,
-//             trans: &graphics::math::Matrix2d, msg: &str) -> f64 {
-//    let text_height = (height - 2) / 3 * 2;
-//    graphics::text([0.8f32, 0.8f32, 0.8f32, 1.0f32], text_height,
-//                   msg, cache, trans.trans(0f64, text_height as f64 + 2f64),
-//                   graphics);
-//
-//    return cache.width(text_height, msg);
-//}
+impl<G, C> Renderable<G, C> for Separator
+    where G: graphics::Graphics {
 
-//fn draw_text_right(graphics: &mut opengl_graphics::GlGraphics, height: u32,
-//                   cache: &mut opengl_graphics::glyph_cache::GlyphCache,
-//                   trans: &graphics::math::Matrix2d, msg: &str) -> f64 {
-//    let text_height = (height - 2) / 3 * 2;
-//    let text_width = cache.width(text_height, msg);
-//
-//    return draw_text(graphics, height, cache, &trans.trans(-text_width, 0f64), msg);
-//}
+    fn get_size(&self, _: &mut C, _: u32) -> f64
+    { return 9f64; }
 
-//fn draw_seperator_right(graphics: &mut opengl_graphics::GlGraphics, height: u32,
-//                        trans: &graphics::math::Matrix2d) {
-//    graphics::line([0.8f32, 0.8f32, 0.8f32, 1.0f32], 0.2f64,
-//                   [0f64, 3f64, 0f64, height as f64 - 3f64],
-//                   trans.trans(-4f64, 0f64), graphics);
-//}
+
+    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) {
+        graphics::line([0.8f32, 0.8f32, 0.8f32, 1.0f32], 0.5f64,
+                       [0f64, 3f64, 0f64, height as f64 - 3f64],
+                       trans.trans(0f64, 0f64), g);
+    }
+
+}
 
 fn draw_seperator<G>(graphics: &mut G, height: u32,
                      trans: &graphics::math::Matrix2d)
@@ -77,11 +67,12 @@ fn draw_seperator<G>(graphics: &mut G, height: u32,
                    trans.trans(0f64, 0f64), graphics);
 }
 
-fn draw_text_list<'a, C, G, I>(graphics: &mut G, height: u32, cache: &mut C,
-                               trans: &graphics::math::Matrix2d, strs: I) -> f64
+fn draw_text_list<'a, C, G, I, R>(graphics: &mut G, height: u32, cache: &mut C,
+                                  trans: &graphics::math::Matrix2d, strs: I) -> f64
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
-          I: std::iter::Iterator<Item=&'a String> {
+          R: 'a + Renderable<G, C>,
+          I: std::iter::Iterator<Item=&'a Box<R>> {
     let mut total_offset = 0f64;
     let mut cur_trans = trans.trans(0f64, 0f64);
     let mut first = true;
@@ -93,8 +84,8 @@ fn draw_text_list<'a, C, G, I>(graphics: &mut G, height: u32, cache: &mut C,
             first = false;
         }
 
-        x.do_render(graphics, height, &cur_trans, cache); //draw_text(graphics, height, cache, &cur_trans, x.as_str());
-        let offset = <String as Renderable<G, C>>::get_size(x, cache, height);
+        x.as_ref().do_render(graphics, height, &cur_trans, cache);
+        let offset = <R as Renderable<G, C>>::get_size(x.as_ref(), cache, height);
         cur_trans = cur_trans.trans(offset, 0f64);
         total_offset += offset;
     }
@@ -102,10 +93,11 @@ fn draw_text_list<'a, C, G, I>(graphics: &mut G, height: u32, cache: &mut C,
     return total_offset;
 }
 
-fn draw_window(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
-               source: &LinkedList<String>,
-               graphics : &mut opengl_graphics::GlGraphics,
-               width: u32, height: u32) {
+fn draw_window<R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
+                  source: &LinkedList<Box<R>>,
+                  graphics : &mut opengl_graphics::GlGraphics,
+                  width: u32, height: u32)
+    where for<'a> R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> {
 
     println!("Going to draw the window");
 
@@ -118,20 +110,23 @@ fn draw_window(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
     });
 }
 
-fn read_stdin(str_list: &RefCell<LinkedList<String>>) -> bool {
+fn read_stdin<R>(str_list: &RefCell<LinkedList<Box<R>>>) -> bool
+    where for<'a> R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> {
+
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer);
-    str_list.borrow_mut().deref_mut().push_back(String::from(buffer.trim()));
+    let tmp = Box::new(String::from(buffer.trim()));
+    str_list.borrow_mut().deref_mut().push_back(tmp); // as Box<R>);
 
     return true;
 }
 
 fn main() {
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
-    let mut list :LinkedList<String> = LinkedList::new();
+    let mut list :LinkedList<Box<_>> = LinkedList::new();
 
-    list.push_back(String::from("This is date"));
-    list.push_back(String::from("This is ram usage"));
+    list.push_back(Box::new(String::from("This is date")) as Box<_>);
+    list.push_back(Box::new(String::from("This is ram usage")) as Box<_>);
 
     let list_cell = Rc::new(RefCell::new(list));
 
