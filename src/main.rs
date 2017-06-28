@@ -93,11 +93,11 @@ fn draw_text_list<'a, C, G, I, R>(graphics: &mut G, height: u32, cache: &mut C,
     return total_offset;
 }
 
-fn draw_window<R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
+fn draw_window<'a, R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
                   source: &LinkedList<Box<R>>,
                   graphics : &mut opengl_graphics::GlGraphics,
                   width: u32, height: u32)
-    where for<'a> R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> {
+    where R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> {
 
     println!("Going to draw the window");
 
@@ -110,29 +110,32 @@ fn draw_window<R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache,
     });
 }
 
-fn read_stdin<R>(str_list: &RefCell<LinkedList<Box<R>>>) -> bool
-    where for<'a> R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> {
+fn read_stdin<C, G, R>(str_list: &Rc<RefCell<LinkedList<Box<R>>>>) -> bool
+    where C: graphics::character::CharacterCache,
+          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
+          R: Renderable<G, C> {
 
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer);
     let tmp = Box::new(String::from(buffer.trim()));
-    str_list.borrow_mut().deref_mut().push_back(tmp); // as Box<R>);
+    let list = str_list.borrow_mut().deref_mut();
+    //list.push_back(tmp as Box<R>);
 
     return true;
 }
 
 fn main() {
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
-    let mut list :LinkedList<Box<_>> = LinkedList::new();
+    let mut list: LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>>> = LinkedList::new();
 
-    list.push_back(Box::new(String::from("This is date")) as Box<_>);
-    list.push_back(Box::new(String::from("This is ram usage")) as Box<_>);
+    list.push_back(Box::new(String::from("This is date"))); // as Box<_>);
+    list.push_back(Box::new(String::from("This is ram usage"))); // as Box<_>);
 
     let list_cell = Rc::new(RefCell::new(list));
 
     {
         let mut fun_list = LinkedList::new();
-        let cell_cpy = list_cell.clone();
+        let cell_cpy: Rc<RefCell<LinkedList<Box<_>>>> = list_cell.clone();
         fun_list.push_back((0 as c_int, Box::new(move || read_stdin(&cell_cpy)) as Box<FnMut() -> bool>));
 
         xorg::do_x11main(|g, w, h| {
