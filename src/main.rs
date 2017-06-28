@@ -48,10 +48,10 @@ impl<G, C> Renderable<G, C> for Separator
     where G: graphics::Graphics {
 
     fn get_size(&self, _: &mut C, _: u32) -> f64
-    { return 9f64; }
+    { return 2f64; }
 
 
-    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) {
+    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, _: &mut C) {
         graphics::line([0.8f32, 0.8f32, 0.8f32, 1.0f32], 0.5f64,
                        [0f64, 3f64, 0f64, height as f64 - 3f64],
                        trans.trans(0f64, 0f64), g);
@@ -59,34 +59,18 @@ impl<G, C> Renderable<G, C> for Separator
 
 }
 
-fn draw_seperator<G>(graphics: &mut G, height: u32,
-                     trans: &graphics::math::Matrix2d)
-    where G: graphics::Graphics {
-    graphics::line([0.8f32, 0.8f32, 0.8f32, 1.0f32], 0.5f64,
-                   [0f64, 3f64, 0f64, height as f64 - 3f64],
-                   trans.trans(0f64, 0f64), graphics);
-}
-
 fn draw_text_list<'a, C, G, I, R>(graphics: &mut G, height: u32, cache: &mut C,
                                   trans: &graphics::math::Matrix2d, strs: I) -> f64
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
-          R: 'a + Renderable<G, C>,
+          R: 'a + Renderable<G, C> + ?Sized,
           I: std::iter::Iterator<Item=&'a Box<R>> {
     let mut total_offset = 0f64;
     let mut cur_trans = trans.trans(0f64, 0f64);
-    let mut first = true;
     for x in strs {
-        if !first {
-            draw_seperator(graphics, height, &cur_trans.trans(5f64, 0f64));
-            cur_trans = cur_trans.trans(9f64, 0f64);
-        } else {
-            first = false;
-        }
-
         x.as_ref().do_render(graphics, height, &cur_trans, cache);
         let offset = <R as Renderable<G, C>>::get_size(x.as_ref(), cache, height);
-        cur_trans = cur_trans.trans(offset, 0f64);
+        cur_trans = cur_trans.trans(offset + 3f64, 0f64);
         total_offset += offset;
     }
 
@@ -97,7 +81,7 @@ fn draw_window<'a, R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
                   source: &LinkedList<Box<R>>,
                   graphics : &mut opengl_graphics::GlGraphics,
                   width: u32, height: u32)
-    where R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> {
+    where R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> + ?Sized {
 
     println!("Going to draw the window");
 
@@ -110,26 +94,26 @@ fn draw_window<'a, R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
     });
 }
 
-fn read_stdin<C, G, R>(str_list: &Rc<RefCell<LinkedList<Box<R>>>>) -> bool
+fn read_stdin<C, G>(str_list: &Rc<RefCell<LinkedList<Box<Renderable<G, C>>>>>) -> bool
     where C: graphics::character::CharacterCache,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
-          R: Renderable<G, C> {
+          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>, {
 
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer);
     let tmp = Box::new(String::from(buffer.trim()));
-    let list = str_list.borrow_mut().deref_mut();
-    //list.push_back(tmp as Box<R>);
+    let mut list = str_list.borrow_mut();
+
+    if !list.is_empty() {
+        list.deref_mut().push_back(Box::new(Separator))
+    }
+    list.deref_mut().push_back(tmp);
 
     return true;
 }
 
 fn main() {
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
-    let mut list: LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>>> = LinkedList::new();
-
-    list.push_back(Box::new(String::from("This is date"))); // as Box<_>);
-    list.push_back(Box::new(String::from("This is ram usage"))); // as Box<_>);
+    let list: LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>>> = LinkedList::new();
 
     let list_cell = Rc::new(RefCell::new(list));
 
