@@ -13,6 +13,7 @@ extern crate opengl_graphics;
 mod xorg;
 
 use graphics::Transformed;
+use std::vec::Vec;
 use std::boxed::Box;
 use std::cell::RefCell;
 use std::collections::linked_list::LinkedList;
@@ -22,7 +23,7 @@ use std::rc::Rc;
 
 trait Renderable<G, C> {
     fn get_size(&self, cache: &mut C, height: u32) -> f64;
-    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C);
+    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) -> f64;
 }
 
 impl<G, C> Renderable<G, C> for String
@@ -34,11 +35,12 @@ impl<G, C> Renderable<G, C> for String
         cache.width(text_height, self.as_str())
     }
 
-    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) {
+    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) -> f64 {
         let text_height = (height - 2) / 3 * 2;
         graphics::text([0.8f32, 0.8f32, 0.8f32, 1.0f32], text_height,
                        self.as_str(), cache, trans.trans(0f64, text_height as f64 + 2f64),
                        g);
+        return cache.width(text_height, self.as_str());
     }
 }
 
@@ -48,15 +50,47 @@ impl<G, C> Renderable<G, C> for Separator
     where G: graphics::Graphics {
 
     fn get_size(&self, _: &mut C, _: u32) -> f64
-    { return 2f64; }
+    { return 1f64; }
 
-
-    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, _: &mut C) {
+    fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, _: &mut C) -> f64 {
         graphics::line([0.8f32, 0.8f32, 0.8f32, 1.0f32], 0.5f64,
                        [0f64, 3f64, 0f64, height as f64 - 3f64],
                        trans.trans(0f64, 0f64), g);
+
+        return 1f64;
+    }
+}
+
+impl<G, C, I> Renderable<G, C> for I// Vec<Box<Renderable<G, C>>> {
+    where for<'a> &'a I: std::iter::IntoIterator { //<Box<Renderable<G, C>>> {
+    fn get_size(&self, c: &mut C, h: u32) -> f64 {
+        let mut first = true;
+        let mut ret = 0f64;
+        for ref x in self {
+            ret += x.get_size(c, h);
+
+            if first {
+                first = false;
+            } else {
+                ret += 2f64;
+            }
+        }
+
+        return ret;
     }
 
+    fn do_render(&self, g: &mut G, h: u32, trans: &graphics::math::Matrix2d, c: &mut C) -> f64 {
+        let mut total_offset = 0f64;
+        let mut cur_trans = trans.trans(0f64, 0f64);
+
+        for ref x in self {
+            let offset = x.as_ref().do_render(g, h, &cur_trans, c);
+            cur_trans = cur_trans.trans(offset + 4f64, 0f64);
+            total_offset += offset + 4f64;
+        }
+
+        return total_offset;
+    }
 }
 
 fn draw_text_list<'a, C, G, I, R>(graphics: &mut G, height: u32, cache: &mut C,
@@ -70,7 +104,7 @@ fn draw_text_list<'a, C, G, I, R>(graphics: &mut G, height: u32, cache: &mut C,
     for x in strs {
         x.as_ref().do_render(graphics, height, &cur_trans, cache);
         let offset = <R as Renderable<G, C>>::get_size(x.as_ref(), cache, height);
-        cur_trans = cur_trans.trans(offset + 3f64, 0f64);
+        cur_trans = cur_trans.trans(offset + 4f64, 0f64);
         total_offset += offset;
     }
 
