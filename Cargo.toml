@@ -12,6 +12,7 @@ libc = "0.2.24"
 piston2d-graphics = "0.21.1"
 piston2d-opengl_graphics = "0.44.0"
 gl = "0.6.2"
+itertools = "0.6.0"
 
 [dependencies.xcb]
 version =  "0.7.6"

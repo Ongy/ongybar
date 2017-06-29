@@ -14,7 +14,6 @@ mod xorg;
 
 use std::iter::IntoIterator;
 use graphics::Transformed;
-use std::vec::Vec;
 use std::boxed::Box;
 use std::cell::RefCell;
 use std::collections::linked_list::LinkedList;
@@ -28,6 +27,7 @@ trait Renderable<G, C> {
 }
 
 struct OngyStr(String);
+struct Separator;
 
 impl<G, C> Renderable<G, C> for OngyStr
     where C: graphics::character::CharacterCache,
@@ -46,8 +46,6 @@ impl<G, C> Renderable<G, C> for OngyStr
         return cache.width(text_height, self.0.as_str());
     }
 }
-
-struct Separator;
 
 impl<G, C> Renderable<G, C> for Separator
     where G: graphics::Graphics {
@@ -71,13 +69,13 @@ impl<G, C, I> Renderable<G, C> for I
         let mut ret = 0f64;
 
         for ref x in self.into_iter() {
-            ret += x.get_size(c, h);
-
             if first {
                 first = false;
             } else {
-                ret += 2f64;
+                ret += 4f64;
             }
+
+            ret += x.get_size(c, h);
         }
 
         return ret;
@@ -117,15 +115,23 @@ fn read_stdin<C, G>(str_list: &Rc<RefCell<LinkedList<Box<Renderable<G, C>>>>>) -
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>, {
 
+    let mut first = true;
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer);
-    let tmp = Box::new(OngyStr(String::from(buffer.trim())));
+
+    let new_list = buffer.trim().split("|").map(|x| Box::new(OngyStr(String::from(x))) as Box<Renderable<G, C>>);
+
     let mut list = str_list.borrow_mut();
 
-    if !list.is_empty() {
-        list.deref_mut().push_back(Box::new(Separator))
+    list.clear();
+    for b in new_list {
+        if first {
+            first = false;
+        } else {
+            list.push_back(Box::new(Separator));
+        }
+        list.push_back(b);
     }
-    list.deref_mut().push_back(tmp);
 
     return true;
 }
