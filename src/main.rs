@@ -12,6 +12,7 @@ extern crate opengl_graphics;
 
 mod xorg;
 
+use std::iter::IntoIterator;
 use graphics::Transformed;
 use std::vec::Vec;
 use std::boxed::Box;
@@ -26,21 +27,23 @@ trait Renderable<G, C> {
     fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) -> f64;
 }
 
-impl<G, C> Renderable<G, C> for String
+struct OngyStr(String);
+
+impl<G, C> Renderable<G, C> for OngyStr
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> {
 
     fn get_size(&self, cache: &mut C, height: u32) -> f64 {
         let text_height = (height - 2) / 3 * 2;
-        cache.width(text_height, self.as_str())
+        cache.width(text_height, self.0.as_str())
     }
 
     fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) -> f64 {
         let text_height = (height - 2) / 3 * 2;
         graphics::text([0.8f32, 0.8f32, 0.8f32, 1.0f32], text_height,
-                       self.as_str(), cache, trans.trans(0f64, text_height as f64 + 2f64),
+                       self.0.as_str(), cache, trans.trans(0f64, text_height as f64 + 2f64),
                        g);
-        return cache.width(text_height, self.as_str());
+        return cache.width(text_height, self.0.as_str());
     }
 }
 
@@ -61,12 +64,13 @@ impl<G, C> Renderable<G, C> for Separator
     }
 }
 
-impl<G, C, I> Renderable<G, C> for I// Vec<Box<Renderable<G, C>>> {
-    where for<'a> &'a I: std::iter::IntoIterator { //<Box<Renderable<G, C>>> {
+impl<G, C, I> Renderable<G, C> for I
+    where for<'a> &'a I: std::iter::IntoIterator<Item=&'a Box<Renderable<G, C>>> {
     fn get_size(&self, c: &mut C, h: u32) -> f64 {
         let mut first = true;
         let mut ret = 0f64;
-        for ref x in self {
+
+        for ref x in self.into_iter() {
             ret += x.get_size(c, h);
 
             if first {
@@ -83,8 +87,8 @@ impl<G, C, I> Renderable<G, C> for I// Vec<Box<Renderable<G, C>>> {
         let mut total_offset = 0f64;
         let mut cur_trans = trans.trans(0f64, 0f64);
 
-        for ref x in self {
-            let offset = x.as_ref().do_render(g, h, &cur_trans, c);
+        for ref x in self.into_iter() {
+            let offset = x.do_render(g, h, &cur_trans, c);
             cur_trans = cur_trans.trans(offset + 4f64, 0f64);
             total_offset += offset + 4f64;
         }
@@ -93,29 +97,10 @@ impl<G, C, I> Renderable<G, C> for I// Vec<Box<Renderable<G, C>>> {
     }
 }
 
-fn draw_text_list<'a, C, G, I, R>(graphics: &mut G, height: u32, cache: &mut C,
-                                  trans: &graphics::math::Matrix2d, strs: I) -> f64
-    where C: graphics::character::CharacterCache,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
-          R: 'a + Renderable<G, C> + ?Sized,
-          I: std::iter::Iterator<Item=&'a Box<R>> {
-    let mut total_offset = 0f64;
-    let mut cur_trans = trans.trans(0f64, 0f64);
-    for x in strs {
-        x.as_ref().do_render(graphics, height, &cur_trans, cache);
-        let offset = <R as Renderable<G, C>>::get_size(x.as_ref(), cache, height);
-        cur_trans = cur_trans.trans(offset + 4f64, 0f64);
-        total_offset += offset;
-    }
-
-    return total_offset;
-}
-
-fn draw_window<'a, R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
-                  source: &LinkedList<Box<R>>,
+fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
+                  source: &LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>>>>,
                   graphics : &mut opengl_graphics::GlGraphics,
-                  width: u32, height: u32)
-    where R: Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>> + ?Sized {
+                  width: u32, height: u32) {
 
     println!("Going to draw the window");
 
@@ -124,7 +109,7 @@ fn draw_window<'a, R>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
                                         window_size: [width, height] };
     graphics.draw(viewport, |c, g| {
         graphics::clear(graphics::color::BLACK, g);
-        draw_text_list(g, height, glyphs, &c.transform, source.iter());
+        source.do_render(g, height, &c.transform, glyphs);
     });
 }
 
@@ -134,7 +119,7 @@ fn read_stdin<C, G>(str_list: &Rc<RefCell<LinkedList<Box<Renderable<G, C>>>>>) -
 
     let mut buffer = String::new();
     std::io::stdin().read_line(&mut buffer);
-    let tmp = Box::new(String::from(buffer.trim()));
+    let tmp = Box::new(OngyStr(String::from(buffer.trim())));
     let mut list = str_list.borrow_mut();
 
     if !list.is_empty() {
