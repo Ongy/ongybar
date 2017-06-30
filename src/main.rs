@@ -12,6 +12,10 @@ extern crate opengl_graphics;
 
 mod xorg;
 
+use std::os::unix::io::AsRawFd;
+use std::process::Command;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::iter::IntoIterator;
 use graphics::Transformed;
 use std::boxed::Box;
@@ -21,10 +25,17 @@ use std::ops::DerefMut;
 use std::os::raw::*;
 use std::rc::Rc;
 
+
 trait Renderable<G, C> {
     fn get_size(&self, cache: &mut C, height: u32) -> f64;
     fn do_render(&self, g: &mut G, height: u32, trans: &graphics::math::Matrix2d, cache: &mut C) -> f64;
 }
+
+struct Window<G, C> {
+    right_list: LinkedList<Box<Renderable<G, C>>>,
+    left_list:  LinkedList<Box<Renderable<G, C>>>,
+}
+
 
 struct OngyStr(String);
 struct Separator;
@@ -95,10 +106,17 @@ impl<G, C, I> Renderable<G, C> for I
     }
 }
 
+fn render_right<G, C, R>(g: &mut G, obj: &R, c : &mut C, trans: &graphics::math::Matrix2d, height: u32)
+    where R: Renderable<G, C> {
+    let size = obj.get_size(c, height);
+    obj.do_render(g, height, &trans.trans(-size, 0f64), c);
+}
+
 fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
-                  source: &LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>>>>,
-                  graphics : &mut opengl_graphics::GlGraphics,
-                  width: u32, height: u32) {
+                   win: &Window<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>>,
+                   //source: &LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>>>>,
+                   graphics : &mut opengl_graphics::GlGraphics,
+                   width: u32, height: u32) {
 
     println!("Going to draw the window");
 
@@ -107,21 +125,23 @@ fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
                                         window_size: [width, height] };
     graphics.draw(viewport, |c, g| {
         graphics::clear(graphics::color::BLACK, g);
-        source.do_render(g, height, &c.transform, glyphs);
+        win.left_list.do_render(g, height, &c.transform, glyphs);
+
+        render_right(g, &win.right_list, glyphs, &c.transform.trans(width as f64, 0f64), height);
     });
 }
 
-fn read_stdin<C, G>(str_list: &Rc<RefCell<LinkedList<Box<Renderable<G, C>>>>>) -> bool
+fn read_pipe<C, G, R>(reader: &mut R, str_list: &mut LinkedList<Box<Renderable<G, C>>>) -> bool
     where C: graphics::character::CharacterCache,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>, {
-
+          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>,
+          R: BufRead {
     let mut first = true;
     let mut buffer = String::new();
-    std::io::stdin().read_line(&mut buffer);
+    let _ = reader.read_line(&mut buffer);
 
     let new_list = buffer.trim().split("|").map(|x| Box::new(OngyStr(String::from(x))) as Box<Renderable<G, C>>);
 
-    let mut list = str_list.borrow_mut();
+    let mut list = str_list;
 
     list.clear();
     for b in new_list {
@@ -136,16 +156,27 @@ fn read_stdin<C, G>(str_list: &Rc<RefCell<LinkedList<Box<Renderable<G, C>>>>>) -
     return true;
 }
 
+
+
 fn main() {
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
-    let list: LinkedList<Box<Renderable<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>>> = LinkedList::new();
+    let list = Window { left_list: LinkedList::new(), right_list: LinkedList::new() };
 
     let list_cell = Rc::new(RefCell::new(list));
 
     {
         let mut fun_list = LinkedList::new();
-        let cell_cpy: Rc<RefCell<LinkedList<Box<_>>>> = list_cell.clone();
-        fun_list.push_back((0 as c_int, Box::new(move || read_stdin(&cell_cpy)) as Box<FnMut() -> bool>));
+
+        let std_cpy = list_cell.clone();
+        let mut std_reader = BufReader::new(std::io::stdin());
+        fun_list.push_back((0 as c_int, Box::new(move || read_pipe(&mut std_reader, &mut std_cpy.borrow_mut().left_list)) as Box<FnMut() -> bool>));
+
+        let child = Command::new("monky").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+        let stdout = child.stdout.unwrap();
+        let fd = stdout.as_raw_fd();
+        let mut pipe_reader = BufReader::new(stdout);
+        let pipe_cpy = list_cell.clone();
+        fun_list.push_back((fd, Box::new(move || read_pipe(&mut pipe_reader, &mut pipe_cpy.borrow_mut().right_list)) as Box<FnMut() -> bool>));
 
         xorg::do_x11main(|g, w, h| {
                              let mut l = list_cell.borrow_mut();
