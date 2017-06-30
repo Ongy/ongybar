@@ -386,7 +386,7 @@ unsafe fn wait_event<F, G>(win: &X11Window,
                         graphics: &mut G,
                         draw_window: &mut F) -> bool
         where F: FnMut(&mut G, u32, u32) {
-    if let Some(ev) = win.conn.wait_for_event() {
+    if let Some(ev) = win.conn.poll_for_event() {
         handle_event(win, graphics, draw_window, ev);
     }
 
@@ -407,7 +407,7 @@ pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G)
 
         let xcb_fd: c_int = xcb::ffi::base::xcb_get_file_descriptor(win.conn.get_raw_conn());
 
-        const XCB: Token = Token(0);
+        let XCB: Token = Token(xcb_fd as usize);
         let poll = Poll::new().unwrap();
 
         println!("XCB: {}", xcb_fd);
