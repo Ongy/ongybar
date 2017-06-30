@@ -410,6 +410,8 @@ pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G)
         const XCB: Token = Token(0);
         let poll = Poll::new().unwrap();
 
+        println!("XCB: {}", xcb_fd);
+
         poll.register(&mio::unix::EventedFd(&xcb_fd),
                       XCB, Ready::readable(),
                       PollOpt::level()).unwrap();
@@ -422,20 +424,22 @@ pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G)
 
         for x in fun_list {
             let tok = Token(x.0 as usize);
+            println!("Event: {}", x.0);
             poll.register(&mio::unix::EventedFd(&x.0), tok, Ready::readable(),
                           PollOpt::level()).unwrap();
             map.insert(tok, x.1);
         }
 
-        let mut events = Events::with_capacity(1024);
 
+        let mut events = Events::with_capacity(map.len() + 2);
         RUN = true;
-        println!("Going into X loop");
+
         loop {
             poll_event(&win, graphics_cell.borrow_mut().deref_mut(), fun_cell.borrow_mut().deref_mut());
             poll.poll(&mut events, None).unwrap();
 
             for event in events.iter() {
+                println!("{:?}", event);
                 let mut fun = map.get_mut(&event.token()).unwrap();
                 if fun.deref_mut()() {
                     let mut draw_fun = fun_cell.borrow_mut();
