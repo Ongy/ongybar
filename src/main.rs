@@ -10,8 +10,12 @@ extern crate libc;
 extern crate graphics;
 extern crate opengl_graphics;
 
+extern crate num_traits;
+
 mod xorg;
 
+use num_traits::Num;
+use std::io::Write;
 use std::os::unix::io::AsRawFd;
 use std::process::Command;
 use std::io::BufRead;
@@ -164,9 +168,57 @@ impl<G, C> DzenIter<G, C> {
     }
 }
 
+fn find_str(text: &String) -> Option<(OngyStr, String)> {
+    match text.find('^') {
+        None => {
+            return Some((OngyStr(text.clone()), String::new()));
+        }
+        Some(i) => {
+            let left  = &text.as_str()[..i];
+            let right = &text.as_str()[i + 1..];
+
+            if right.chars().nth(0) == Some('^') {
+                match find_str(&String::from(&right[1..])) {
+                    Some((OngyStr(x), ret)) => {
+                        let mut tmp = String::from(&text.as_str()[.. i + 1]);
+                        tmp.push_str(x.as_str());
+                        return Some((OngyStr(tmp), ret));
+                    },
+                    None => {
+                        return Some((OngyStr(String::from(&text.as_str()[.. i + 1])), String::from(right)));
+                    }
+                }
+            }
+
+            if i == 0 {
+                return None;
+            }
+
+            return Some((OngyStr(String::from(left)), String::from(&text.as_str()[i ..])));
+        }
+    }
+
+}
+
+fn parse_color(hex_str: &str) -> Option<[f32; 4]> {
+    if hex_str.chars().nth(0) != Some('#') {
+        std::io::stderr().write(b"Sorry, ongybar currently only supports colors as #Hexstr").unwrap();
+        return None;
+    }
+    // TODO: Detect smaller/longer strs!
+    let red   = &hex_str[1..3];
+    let green = &hex_str[3..5];
+    let blue  = &hex_str[5..7];
+    // TODO: Remove the unwrap()...
+    return Some([f32::from_str_radix(red, 16).unwrap(),
+                 f32::from_str_radix(green, 16).unwrap(),
+                 f32::from_str_radix(blue, 16).unwrap(),
+                 1.0]);
+}
+
 impl<G, C> Iterator for DzenIter<G, C>
-    where C: graphics::character::CharacterCache,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>, {
+    where C: graphics::character::CharacterCache + 'static,
+          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> + 'static, {
     type Item=Box<Renderable<G, C>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -174,19 +226,40 @@ impl<G, C> Iterator for DzenIter<G, C>
             return None;
         }
 
-        if !self.text.contains("^") {
-            let tmp = Box::new(OngyStr(self.text.clone()));
-            self.text.clear();
-            return Some(tmp);
+        match find_str(&self.text) {
+            Some ((ret, nxt)) => {
+                self.text = nxt;
+                return Some(Box::new(ret) as Box<Renderable<G, C>>);
+            }
+            None => {
+                if self.text.starts_with("^fg(") {
+                    return match self.text.find(')') {
+                        Some(i) => {
+                            match parse_color(&self.text.as_str()[4 .. i]) {
+                                Some(c) =>  {
+                                    let tmp = dzen_parse(&self.text.as_str()[i + 1 ..]);
+                                    self.text.clear();
+                                    return Some(Box::new(Colored{ color: c, elem: Box::new(tmp)}));
+                                }
+                                None => None
+                            }
+                        }
+                        None => {
+                            std::io::stderr().write(b"Found '^fg(', but couldn't find closing parens!").unwrap();
+                            return None;
+                        }
+                    }
+                }
+                println!("Currently can't handle \"{}\"", self.text);
+                return None;
+            }
         }
-
-        return None;
     }
 }
 
 fn dzen_parse<G, C>(arg: &str) -> Vec<Box<Renderable<G, C>>>
-    where C: graphics::character::CharacterCache,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture>, {
+    where C: graphics::character::CharacterCache + 'static,
+          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> + 'static, {
     return DzenIter::new(arg).collect();
 }
 
