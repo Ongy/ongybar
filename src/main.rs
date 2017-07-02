@@ -40,17 +40,20 @@ impl OngybarState {
     }
 
     fn get_image(&mut self, path: &str) -> Option<&opengl_graphics::Texture> {
-        /* The image is loaded already */ 
-        if let Some(x) = self.images.get(&String::from(path)) {
-            return Some(x);
-        }
+        let p_str = String::from(path);
 
         /* Load the image, insert it into the cache, and then get it */
         // TODO: Remove unwrap()
-        let image = opengl_graphics::Texture::from_path(path).unwrap();
-        self.images.insert(String::from(path), image);
+        if !self.images.contains_key(&p_str) {
+            match  opengl_graphics::Texture::from_path(path) {
+                Ok(image) =>  {
+                    self.images.insert(String::from(path), image);
+                }
+                Err(_) => return None
+            }
+        }
 
-        return self.images.get(&String::from(path));
+        return self.images.get(&p_str);
     }
 }
 
