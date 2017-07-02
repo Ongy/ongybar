@@ -28,11 +28,35 @@ use std::collections::linked_list::LinkedList;
 use std::ops::DerefMut;
 use std::os::raw::*;
 use std::rc::Rc;
+use std::collections::HashMap;
 
+struct OngybarState {
+    images: HashMap<String, <opengl_graphics::GlGraphics as graphics::Graphics>::Texture>,
+}
+
+impl OngybarState {
+    fn new() -> Self {
+        return OngybarState { images: HashMap::new() };
+    }
+
+    fn get_image(&mut self, path: &str) -> Option<&opengl_graphics::Texture> {
+        /* The image is loaded already */ 
+        if let Some(x) = self.images.get(&String::from(path)) {
+            return Some(x);
+        }
+
+        /* Load the image, insert it into the cache, and then get it */
+        // TODO: Remove unwrap()
+        let image = opengl_graphics::Texture::from_path(path).unwrap();
+        self.images.insert(String::from(path), image);
+
+        return self.images.get(&String::from(path));
+    }
+}
 
 trait Renderable<G, C> {
     fn get_size(&self, cache: &mut C, height: u32) -> f64;
-    fn do_render(&self, g: &mut G, height: u32,
+    fn do_render(&self, g: &mut G, height: u32, o: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, cache: &mut C,
                  color: graphics::types::Color) -> f64;
 }
@@ -52,10 +76,10 @@ impl<G, C> Renderable<G, C> for Colored<G, C> {
         return self.elem.get_size(cache, height);
     }
 
-    fn do_render(&self, g: &mut G, height: u32,
+    fn do_render(&self, g: &mut G, height: u32, o: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, cache: &mut C,
                  _: graphics::types::Color) -> f64 {
-        return self.elem.do_render(g, height, trans, cache, self.color);
+        return self.elem.do_render(g, height, o, trans, cache, self.color);
     }
 }
 
@@ -63,9 +87,24 @@ struct OngyStr(String);
 struct OngyPos(f64);
 struct Separator;
 
+// This will be the Path string
+struct OngyImage(String);
+
 struct OngyRect {
     width: f64,
     height: f64,
+}
+
+impl <C> Renderable<opengl_graphics::GlGraphics, C> for OngyImage {
+    fn get_size(&self, cache: &mut C, height: u32) -> f64 {
+        return 0.0;
+    }
+
+    fn do_render(&self, g: &mut opengl_graphics::GlGraphics, height: u32,
+                 o: &mut OngybarState, trans: &graphics::math::Matrix2d,
+                 cache: &mut C, _: graphics::types::Color) -> f64 {
+        return 0.0;
+    }
 }
 
 impl<G, C> Renderable<G, C> for OngyRect
@@ -76,7 +115,7 @@ impl<G, C> Renderable<G, C> for OngyRect
         return self.width;
     }
 
-    fn do_render(&self, g: &mut G, height: u32,
+    fn do_render(&self, g: &mut G, height: u32, _: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, _: &mut C,
                  c: graphics::types::Color) -> f64 {
         // This will be in pixels for now. Percent will probably go into another type
@@ -95,7 +134,7 @@ impl<G, C> Renderable<G, C> for OngyStr
         cache.width(text_height, self.0.as_str())
     }
 
-    fn do_render(&self, g: &mut G, height: u32,
+    fn do_render(&self, g: &mut G, height: u32, _: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, cache: &mut C,
                  c: graphics::types::Color) -> f64 {
         let text_height = (height - 2) * 2 / 3;
@@ -111,7 +150,7 @@ impl<G, C> Renderable<G, C> for Separator
     fn get_size(&self, _: &mut C, _: u32) -> f64
     { return 1f64; }
 
-    fn do_render(&self, g: &mut G, height: u32,
+    fn do_render(&self, g: &mut G, height: u32, _: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, _: &mut C,
                  c: graphics::types::Color) -> f64 {
         graphics::line(c, 0.5f64, [0f64, 3f64, 0f64, height as f64 - 3f64],
@@ -126,7 +165,7 @@ impl<G, C> Renderable<G, C> for OngyPos {
     fn get_size(&self, _: &mut C, _: u32) -> f64
     { return self.0; }
 
-    fn do_render(&self, _: &mut G, _: u32,
+    fn do_render(&self, _: &mut G, _: u32, _: &mut OngybarState,
                  _: &graphics::math::Matrix2d, _: &mut C,
                  _: graphics::types::Color) -> f64 {
         return self.0;
@@ -152,14 +191,14 @@ impl<G, C, I> Renderable<G, C> for I
         return ret;
     }
 
-    fn do_render(&self, g: &mut G, h: u32,
+    fn do_render(&self, g: &mut G, h: u32, o: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, cache: &mut C,
                  c: graphics::types::Color) -> f64 {
         let mut total_offset = 0f64;
         let mut cur_trans = trans.trans(0f64, 0f64);
 
         for ref x in self.into_iter() {
-            let offset = x.do_render(g, h, &cur_trans, cache, c);
+            let offset = x.do_render(g, h, o, &cur_trans, cache, c);
             cur_trans = cur_trans.trans(offset + 4f64, 0f64);
             total_offset += offset + 4f64;
         }
@@ -168,14 +207,14 @@ impl<G, C, I> Renderable<G, C> for I
     }
 }
 
-fn render_right<G, C, R>(g: &mut G, obj: &R, c : &mut C,
+fn render_right<G, C, R>(g: &mut G, obj: &R, o: &mut OngybarState, c : &mut C,
                          trans: &graphics::math::Matrix2d, height: u32)
     where R: Renderable<G, C> {
     let size = obj.get_size(c, height);
-    obj.do_render(g, height, &trans.trans(-size, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
+    obj.do_render(g, height, o, &trans.trans(-size, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
 }
 
-fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
+fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>, o: &mut OngybarState,
                    win: &Window<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>>,
                    graphics : &mut opengl_graphics::GlGraphics,
                    width: u32, height: u32) {
@@ -184,9 +223,9 @@ fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>,
                                         window_size: [width, height] };
     graphics.draw(viewport, |c, g| {
         graphics::clear(graphics::color::BLACK, g);
-        win.left_list.do_render(g, height, &c.transform, glyphs, [0.8, 0.8, 0.8, 1.0]);
+        win.left_list.do_render(g, height, o, &c.transform, glyphs, [0.8, 0.8, 0.8, 1.0]);
 
-        render_right(g, &win.right_list, glyphs, &c.transform.trans(width as f64, 0f64), height);
+        render_right(g, &win.right_list, o, glyphs, &c.transform.trans(width as f64, 0f64), height);
     });
 }
 
@@ -374,7 +413,7 @@ impl<G, C> Iterator for DzenIter<G, C>
                     }
                 }
                 if self.text.starts_with("^bg(") {
-                    std::io::stderr().write(b"Sorry, ongybar currently ignores background colours").unwrap();
+                    std::io::stderr().write(b"Sorry, ongybar currently ignores background colours\n").unwrap();
                     match self.text.find(')') {
                         None => {
                             std::io::stderr().write(b"Found ^bg(, but not closing parens").unwrap();
@@ -387,7 +426,7 @@ impl<G, C> Iterator for DzenIter<G, C>
                     }
                 }
                 if self.text.starts_with("^pa(") {
-                    std::io::stderr().write(b"Sorry, ongybar currently ignores background colours").unwrap();
+                    std::io::stderr().write(b"Sorry, ongybar currently ignores total positions\n").unwrap();
                     match self.text.find(')') {
                         None => {
                             std::io::stderr().write(b"Found ^pa(, but not closing parens").unwrap();
@@ -400,7 +439,7 @@ impl<G, C> Iterator for DzenIter<G, C>
                     }
                 }
                 if self.text.starts_with("^i(") {
-                    std::io::stderr().write(b"Sorry, ongybar currently ignores images").unwrap();
+                    std::io::stderr().write(b"Sorry, ongybar currently ignores images\n").unwrap();
                     match self.text.find(')') {
                         None => {
                             std::io::stderr().write(b"Found ^i(, but not closing parens").unwrap();
@@ -458,6 +497,7 @@ fn read_pipe<G, C, R>(reader: &mut R, str_list: &mut LinkedList<Box<Renderable<G
 fn main() {
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
     let list = Window { left_list: LinkedList::new(), right_list: LinkedList::new() };
+    let mut state = OngybarState::new();
 
     let list_cell = Rc::new(RefCell::new(list));
 
@@ -480,7 +520,7 @@ fn main() {
 
         xorg::do_x11main(|g, w, h| {
                              let mut l = list_cell.borrow_mut();
-                             draw_window(&mut glyphs, l.deref_mut(), g, w, h); },
+                             draw_window(&mut glyphs, &mut state, l.deref_mut(), g, w, h); },
                          || opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0),
                          fun_list.into_iter());
     }
