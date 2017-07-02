@@ -14,6 +14,7 @@ extern crate num_traits;
 
 mod xorg;
 
+use graphics::ImageSize;
 use num_traits::Num;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
@@ -39,26 +40,23 @@ impl OngybarState {
         return OngybarState { images: HashMap::new() };
     }
 
-    fn get_image(&mut self, path: &str) -> Option<&opengl_graphics::Texture> {
-        let p_str = String::from(path);
-
+    fn get_image(&mut self, path: &String) -> Option<&opengl_graphics::Texture> {
         /* Load the image, insert it into the cache, and then get it */
-        // TODO: Remove unwrap()
-        if !self.images.contains_key(&p_str) {
+        if !self.images.contains_key(path) {
             match  opengl_graphics::Texture::from_path(path) {
                 Ok(image) =>  {
-                    self.images.insert(String::from(path), image);
+                    self.images.insert(path.clone(), image);
                 }
                 Err(_) => return None
             }
         }
 
-        return self.images.get(&p_str);
+        return self.images.get(path);
     }
 }
 
 trait Renderable<G, C> {
-    fn get_size(&self, cache: &mut C, height: u32) -> f64;
+    fn get_size(&self, cache: &mut C, height: u32, &mut OngybarState) -> f64;
     fn do_render(&self, g: &mut G, height: u32, o: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, cache: &mut C,
                  color: graphics::types::Color) -> f64;
@@ -75,8 +73,8 @@ struct Colored<G, C> {
 }
 
 impl<G, C> Renderable<G, C> for Colored<G, C> {
-    fn get_size(&self, cache: &mut C, height: u32) -> f64 {
-        return self.elem.get_size(cache, height);
+    fn get_size(&self, cache: &mut C, height: u32, o: &mut OngybarState) -> f64 {
+        return self.elem.get_size(cache, height, o);
     }
 
     fn do_render(&self, g: &mut G, height: u32, o: &mut OngybarState,
@@ -98,15 +96,27 @@ struct OngyRect {
     height: f64,
 }
 
-impl <C> Renderable<opengl_graphics::GlGraphics, C> for OngyImage {
-    fn get_size(&self, cache: &mut C, height: u32) -> f64 {
-        return 0.0;
+impl <G, C> Renderable<G, C> for OngyImage
+    where G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> {
+    fn get_size(&self, _: &mut C, _: u32, o: &mut OngybarState) -> f64 {
+        return match o.get_image(&self.0) {
+            Some(i) => i.get_width() as f64,
+            None => 0.0,
+        }
     }
 
-    fn do_render(&self, g: &mut opengl_graphics::GlGraphics, height: u32,
+    fn do_render(&self, g: &mut G, height: u32,
                  o: &mut OngybarState, trans: &graphics::math::Matrix2d,
-                 cache: &mut C, _: graphics::types::Color) -> f64 {
-        return 0.0;
+                 _: &mut C, _: graphics::types::Color) -> f64 {
+        match o.get_image(&self.0) {
+            Some(i) => {
+                let i_height = i.get_height() as f64;
+                let offset = height as f64 / 2.0 - i_height / 2.0;
+                graphics::image(i, trans.trans(0.0, offset), g);
+                return i.get_width() as f64;
+            }
+            None => return 0.0,
+        }
     }
 }
 
@@ -114,7 +124,7 @@ impl<G, C> Renderable<G, C> for OngyRect
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> {
 
-    fn get_size(&self, _: &mut C, _: u32) -> f64 {
+    fn get_size(&self, _: &mut C, _: u32, _: &mut OngybarState) -> f64 {
         return self.width;
     }
 
@@ -132,9 +142,10 @@ impl<G, C> Renderable<G, C> for OngyStr
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> {
 
-    fn get_size(&self, cache: &mut C, height: u32) -> f64 {
+    fn get_size(&self, cache: &mut C, height: u32, _: &mut OngybarState) -> f64 {
         let text_height = (height - 2) * 2 / 3;
-        cache.width(text_height, self.0.as_str())
+
+        return cache.width(text_height, self.0.as_str());
     }
 
     fn do_render(&self, g: &mut G, height: u32, _: &mut OngybarState,
@@ -143,6 +154,7 @@ impl<G, C> Renderable<G, C> for OngyStr
         let text_height = (height - 2) * 2 / 3;
         graphics::text(c, text_height, self.0.as_str(), cache,
                        trans.trans(0f64, text_height as f64 + 2f64), g);
+
         return cache.width(text_height, self.0.as_str());
     }
 }
@@ -150,7 +162,7 @@ impl<G, C> Renderable<G, C> for OngyStr
 impl<G, C> Renderable<G, C> for Separator
     where G: graphics::Graphics {
 
-    fn get_size(&self, _: &mut C, _: u32) -> f64
+    fn get_size(&self, _: &mut C, _: u32, _: &mut OngybarState) -> f64
     { return 1f64; }
 
     fn do_render(&self, g: &mut G, height: u32, _: &mut OngybarState,
@@ -165,7 +177,7 @@ impl<G, C> Renderable<G, C> for Separator
 
 impl<G, C> Renderable<G, C> for OngyPos {
 
-    fn get_size(&self, _: &mut C, _: u32) -> f64
+    fn get_size(&self, _: &mut C, _: u32, _: &mut OngybarState) -> f64
     { return self.0; }
 
     fn do_render(&self, _: &mut G, _: u32, _: &mut OngybarState,
@@ -177,7 +189,7 @@ impl<G, C> Renderable<G, C> for OngyPos {
 
 impl<G, C, I> Renderable<G, C> for I
     where for<'a> &'a I: std::iter::IntoIterator<Item=&'a Box<Renderable<G, C>>> {
-    fn get_size(&self, c: &mut C, h: u32) -> f64 {
+    fn get_size(&self, c: &mut C, h: u32, o: &mut OngybarState) -> f64 {
         let mut first = true;
         let mut ret = 0f64;
 
@@ -188,7 +200,7 @@ impl<G, C, I> Renderable<G, C> for I
                 ret += 4f64;
             }
 
-            ret += x.get_size(c, h);
+            ret += x.get_size(c, h, o);
         }
 
         return ret;
@@ -197,13 +209,19 @@ impl<G, C, I> Renderable<G, C> for I
     fn do_render(&self, g: &mut G, h: u32, o: &mut OngybarState,
                  trans: &graphics::math::Matrix2d, cache: &mut C,
                  c: graphics::types::Color) -> f64 {
+        let mut first = true;
         let mut total_offset = 0f64;
         let mut cur_trans = trans.trans(0f64, 0f64);
 
         for ref x in self.into_iter() {
             let offset = x.do_render(g, h, o, &cur_trans, cache, c);
             cur_trans = cur_trans.trans(offset + 4f64, 0f64);
-            total_offset += offset + 4f64;
+            total_offset += offset;
+            if !first {
+                total_offset += 4.0;
+            } else {
+                first = false;
+            }
         }
 
         return total_offset;
@@ -213,7 +231,7 @@ impl<G, C, I> Renderable<G, C> for I
 fn render_right<G, C, R>(g: &mut G, obj: &R, o: &mut OngybarState, c : &mut C,
                          trans: &graphics::math::Matrix2d, height: u32)
     where R: Renderable<G, C> {
-    let size = obj.get_size(c, height);
+    let size = obj.get_size(c, height, o);
     obj.do_render(g, height, o, &trans.trans(-size, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
 }
 
@@ -267,6 +285,10 @@ fn parse_pos(text: &str) -> Option<OngyPos> {
         Ok(val) => Some(OngyPos(val)),
         Err(_) => None
     }
+}
+
+fn parse_image(text: &str) -> Option<OngyImage> {
+    return Some(OngyImage(String::from(text).replace(".xbm", ".bmp")));
 }
 
 fn parse_rect(text: &str) -> Option<OngyRect> {
@@ -335,8 +357,8 @@ fn parse_color(hex_str: &str) -> Option<[f32; 4]> {
 }
 
 impl<G, C> Iterator for DzenIter<G, C>
-    where C: graphics::character::CharacterCache + 'static,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> + 'static, {
+    where C: graphics::character::CharacterCache<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
+          G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static, {
     type Item=Box<Renderable<G, C>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -415,8 +437,25 @@ impl<G, C> Iterator for DzenIter<G, C>
                         }
                     }
                 }
+                if self.text.starts_with("^i") {
+                    return match self.text.find(')') {
+                        Some(i) => {
+                            match parse_image(&self.text.as_str()[3 .. i]) {
+                                Some(r) =>  {
+                                    self.text = String::from(&self.text.as_str()[i + 1 ..]);
+                                    return Some(Box::new(r));
+                                }
+                                None => None
+                                }
+                            }
+                        None => {
+                            std::io::stderr().write(b"Found '^i(', but couldn't find closing parens!").unwrap();
+                            return None;
+                        }
+                    }
+                }
                 if self.text.starts_with("^bg(") {
-                    std::io::stderr().write(b"Sorry, ongybar currently ignores background colours\n").unwrap();
+                    //std::io::stderr().write(b"Sorry, ongybar currently ignores background colours\n").unwrap();
                     match self.text.find(')') {
                         None => {
                             std::io::stderr().write(b"Found ^bg(, but not closing parens").unwrap();
@@ -429,7 +468,7 @@ impl<G, C> Iterator for DzenIter<G, C>
                     }
                 }
                 if self.text.starts_with("^pa(") {
-                    std::io::stderr().write(b"Sorry, ongybar currently ignores total positions\n").unwrap();
+                    //std::io::stderr().write(b"Sorry, ongybar currently ignores total positions\n").unwrap();
                     match self.text.find(')') {
                         None => {
                             std::io::stderr().write(b"Found ^pa(, but not closing parens").unwrap();
@@ -441,19 +480,6 @@ impl<G, C> Iterator for DzenIter<G, C>
                         }
                     }
                 }
-                if self.text.starts_with("^i(") {
-                    std::io::stderr().write(b"Sorry, ongybar currently ignores images\n").unwrap();
-                    match self.text.find(')') {
-                        None => {
-                            std::io::stderr().write(b"Found ^i(, but not closing parens").unwrap();
-                            return None;
-                        }
-                        Some(i) => {
-                            self.text = String::from(&self.text.as_str()[i + 1..]);
-                            return Some(Box::new(OngyPos(-2.0)));
-                        }
-                    }
-                }
                 println!("Currently can't handle \"{}\"", self.text);
                 return None;
             }
@@ -462,14 +488,14 @@ impl<G, C> Iterator for DzenIter<G, C>
 }
 
 fn dzen_parse<G, C>(arg: &str) -> Vec<Box<Renderable<G, C>>>
-    where C: graphics::character::CharacterCache + 'static,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> + 'static, {
+    where C: graphics::character::CharacterCache<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture>  + 'static,
+          G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static, {
     return DzenIter::new(arg).collect();
 }
 
 fn read_pipe<G, C, R>(reader: &mut R, str_list: &mut LinkedList<Box<Renderable<G, C>>>) -> bool
-    where C: graphics::character::CharacterCache + 'static,
-          G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> + 'static,
+    where C: graphics::character::CharacterCache<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture>  + 'static,
+          G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
           R: BufRead {
     let mut first = true;
     let mut buffer = String::new();
