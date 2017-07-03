@@ -1,36 +1,24 @@
-extern crate x11;
-extern crate xcb;
-extern crate byteorder;
-extern crate hostname;
-
-extern crate mio;
-
-extern crate gl;
-extern crate libc;
 extern crate graphics;
 extern crate opengl_graphics;
-
 
 mod xorg;
 mod modules;
 mod parsers;
 
-use modules::renderable::Renderable;
-use modules::renderable::OngybarState;
+use modules::renderable::{Renderable, OngybarState};
 use modules::separator::Separator;
 
 use parsers::dzen::dzen_parse;
 
-use std::os::unix::io::AsRawFd;
-use std::process::Command;
-use std::io::BufRead;
-use std::io::BufReader;
 use graphics::Transformed;
 use std::boxed::Box;
 use std::cell::RefCell;
 use std::collections::linked_list::LinkedList;
+use std::io::{BufRead, BufReader};
 use std::ops::DerefMut;
 use std::os::raw::*;
+use std::os::unix::io::AsRawFd;
+use std::process::Command;
 use std::rc::Rc;
 
 struct Window<G, C> {

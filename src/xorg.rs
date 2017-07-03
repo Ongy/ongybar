@@ -1,27 +1,25 @@
-use xcb::dri2;
+extern crate mio;
+extern crate x11;
+extern crate xcb;
+extern crate gl;
+extern crate libc;
+extern crate hostname;
 
-use gl;
-use xcb;
-use hostname;
-
-use libc;
-
-use std::ops::DerefMut;
-
-use x11::xlib;
-use x11::glx::*;
+use self::mio::*;
+use self::x11::glx::*;
+use self::x11::xlib;
+use self::xcb::dri2;
 
 use std;
 use std::boxed::Box;
 use std::cell::RefCell;
-use std::os::raw::*;
 use std::collections::HashMap;
-use std::ptr::null_mut;
 use std::ffi::{CStr, CString};
+use std::ops::DerefMut;
+use std::os::raw::*;
 use std::os::raw::{c_int, c_void};
+use std::ptr::null_mut;
 
-use mio;
-use mio::*;
 
 const GLX_CONTEXT_MAJOR_VERSION_ARB: u32 = 0x2091;
 const GLX_CONTEXT_MINOR_VERSION_ARB: u32 = 0x2092;
