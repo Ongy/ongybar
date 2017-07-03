@@ -225,7 +225,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
 
 
         xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(),
-                           0, 0, width, height,
+                           0, 50, width, height,
                            0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
                            (*vi).visualid as u32, &cw_values);
     }
