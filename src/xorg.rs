@@ -201,14 +201,48 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
         (p, dw)
     };
 
-    let width = 1366;
-    let height = 18;
+    let mut width = 0;
+    let mut height = 0;
     let cmap = conn.generate_id();
     let win = conn.generate_id();
+
 
     {
         let setup = conn.get_setup();
         let screen = setup.roots().nth((*vi).screen as usize).unwrap();
+
+        let screen_res_cookie = xcb::randr::get_screen_resources(&conn, screen.root());
+        let screen_res_reply = screen_res_cookie.get_reply().unwrap();
+        let outputs = screen_res_reply.outputs();
+
+        let mut output_cookies = Vec::with_capacity(outputs.len());
+        for output in outputs {
+            output_cookies.push(xcb::randr::get_output_info(&conn, *output, 0));
+        }
+
+        let mut x = 0;
+        let mut y = 0;
+
+        for out_cookie in output_cookies.iter() {
+            if let Ok(reply) = out_cookie.get_reply() {
+                if reply.connection() != 0 {
+                    continue;
+                }
+
+                let name = String::from_utf8_lossy(reply.name());
+                println!(" Output:\t{}", name);
+                let crtc = xcb::randr::get_crtc_info(&conn, reply.crtc(), 0).get_reply().unwrap();
+                println!("\t{}x{}+{}x{}", crtc.width(), crtc.height(), crtc.x(), crtc.y());
+
+                width = crtc.width();
+                //height = crtc.height();
+                height = 16;
+                x = crtc.x();
+                y = crtc.y();
+            }
+        }
+
+        println!("Picking last one for now, since that's easiest to implement :)");
 
 
         xcb::create_colormap(&conn, xcb::COLORMAP_ALLOC_NONE as u8,
@@ -223,7 +257,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
 
 
         xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(),
-                           0, 50, width, height,
+                           x, y, width, height,
                            0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
                            (*vi).visualid as u32, &cw_values);
     }

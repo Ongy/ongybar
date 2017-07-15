@@ -17,7 +17,7 @@ num-traits = "0.1.39"
 
 [dependencies.xcb]
 version =  "0.7.6"
-features = ["xlib_xcb", "dri2"]
+features = ["xlib_xcb", "dri2", "randr"]
 
 [dependencies.x11]
 version = "2.14"
