@@ -34,6 +34,7 @@ struct X11Window {
     wm_delete_window: u32,
     wm_protocols: u32,
     dri2_ev: u8,
+    randr_ev: u8,
     cmap: u32,
 }
 
@@ -273,7 +274,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
         let cw_values = [
             (xcb::CW_BACK_PIXEL, screen.white_pixel()),
             (xcb::CW_BORDER_PIXEL, screen.black_pixel()),
-            (xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE),
+            (xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::randr::NOTIFY_MASK_CRTC_CHANGE),
             (xcb::CW_COLORMAP, cmap)
         ];
 
@@ -306,8 +307,11 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
     conn.flush();
     xlib::XSync(conn.get_raw_dpy(), xlib::False);
 
+    let randr_base = conn.get_extension_data(&mut xcb::randr::id()).unwrap().first_event();
+
+
     let win = X11Window { conn: conn, win: win, dri2_ev: dri2_ev,
-                          screen_num: screen_num,
+                          screen_num: screen_num, randr_ev: randr_base,
                           height: height as u32, width: width as u32,
                           wm_protocols: wm_protocols, cmap: cmap,
                           wm_delete_window: wm_delete_window };
@@ -423,6 +427,14 @@ unsafe fn handle_event<F, G>(win: &X11Window,
                         raw_ev as *mut xlib::xEvent);
                 }
 
+            } else if ev_type == win.randr_ev + xcb::randr::NOTIFY {
+                let v: &xcb::randr::NotifyEvent = xcb::cast_event(&ev);
+                let d = v.u().cc();
+                println!("received CRTC_NOTIFY event:\n\
+                         \ttimestamp: {}, window: {}, crtc: {}, mode: {}, rotation: {}\n\
+                         \tx: {}, y: {}, width: {}, height: {}",
+                         d.timestamp(), d.window(), d.crtc(), d.mode(), d.rotation(),
+                         d.x(), d.y(), d.width(), d.height());
             }
         }
     }
