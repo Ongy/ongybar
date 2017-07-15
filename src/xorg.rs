@@ -234,6 +234,8 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
         let setup = conn.get_setup();
         let screen = setup.roots().nth((*vi).screen as usize).unwrap();
 
+        let _ = xcb::randr::select_input(&conn, screen.root(), xcb::randr::NOTIFY_MASK_CRTC_CHANGE as u16).request_check();
+
         let screen_res_cookie = xcb::randr::get_screen_resources(&conn, screen.root());
         let screen_res_reply = screen_res_cookie.get_reply().unwrap();
         let outputs = screen_res_reply.outputs();
@@ -274,7 +276,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
         let cw_values = [
             (xcb::CW_BACK_PIXEL, screen.white_pixel()),
             (xcb::CW_BORDER_PIXEL, screen.black_pixel()),
-            (xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE | xcb::randr::NOTIFY_MASK_CRTC_CHANGE),
+            (xcb::CW_EVENT_MASK, xcb::EVENT_MASK_EXPOSURE),
             (xcb::CW_COLORMAP, cmap)
         ];
 
@@ -435,6 +437,9 @@ unsafe fn handle_event<F, G>(win: &X11Window,
                          \tx: {}, y: {}, width: {}, height: {}",
                          d.timestamp(), d.window(), d.crtc(), d.mode(), d.rotation(),
                          d.x(), d.y(), d.width(), d.height());
+            } else {
+                println!("Xrandr would be: {} + {}", win.randr_ev, xcb::randr::NOTIFY);
+                println!("Got an unkown event!: {}", ev_type);
             }
         }
     }
