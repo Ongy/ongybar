@@ -250,7 +250,10 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
 
         for out_cookie in output_cookies.iter() {
             if let Ok(reply) = out_cookie.get_reply() {
-                if reply.connection() != 0 {
+                /* Filter out unplugged outputs
+                 * and outputs that aren't set up (yet)
+                 */
+                if reply.connection() != 0  || reply.crtc() == 0 {
                     continue;
                 }
 
