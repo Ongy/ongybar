@@ -152,6 +152,28 @@ unsafe fn set_dock(conn: &xcb::Connection, win: c_uint) {
                          xcb::ATOM_CARDINAL, 32, &val);
 }
 
+unsafe fn set_struts(conn: &xcb::Connection, win: c_uint, x: i16, _: i16, width: u16, height: u16) {
+    {
+        let prop = xcb::intern_atom(conn, false, "_NET_WM_STRUT").get_reply().unwrap().atom();
+        let value = [0, 0, height as u32, 0];
+
+        xcb::change_property(conn, xcb::PROP_MODE_REPLACE as u8, win, prop, xcb::ATOM_CARDINAL, 32, &value);
+    }
+
+    {
+        let prop = xcb::intern_atom(conn, false, "_NET_WM_STRUT_PARTIAL").get_reply().unwrap().atom();
+        let value = [0, 0, height as u32, 0,  /* LEFT RIGHT TOP BOTTOM */
+                     0, 0, /* LEFT */
+                     0, 0, /* RIGHT */
+                     x as u32, x as u32 + width as u32, /* TOP */
+                     0, 0 /* BOTTOM */
+                    ];
+
+        xcb::change_property(conn, xcb::PROP_MODE_REPLACE as u8, win, prop, xcb::ATOM_CARDINAL, 32, &value);
+    }
+
+}
+
 unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
     let (conn, screen_num) = xcb::Connection::connect_with_xlib_display().unwrap();
     conn.set_event_queue_owner(xcb::EventQueueOwner::Xcb);
@@ -260,6 +282,8 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
                            x, y, width, height,
                            0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
                            (*vi).visualid as u32, &cw_values);
+
+        set_struts(&conn, win, x, y, width, height);
     }
 
     xlib::XFree(vi as *mut c_void);
