@@ -66,7 +66,10 @@ fn parse_colorfrag<R> (r: &mut R) -> graphics::types::Color
     let _ = r.read_exact(&mut ret);
 
     /* This is a bit stupid, but eh */
-    return [ret[0] as f32, ret[1] as f32, ret[2] as f32, ret[3] as f32];
+    return [ret[0] as f32 / 255.0,
+            ret[1] as f32 / 255.0,
+            ret[2] as f32 / 255.0,
+            ret[3] as f32 / 255.0];
 }
 
 fn parse_color<R, G, C> (r: &mut R) -> Colored<G, C>
