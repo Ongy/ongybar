@@ -36,8 +36,8 @@ impl<G, C> Renderable<G, C> for OngyRectR
     where C: graphics::character::CharacterCache,
           G: graphics::Graphics<Texture = <C as graphics::character::CharacterCache>::Texture> {
 
-    fn get_size(&self, _: &mut C, _: u32, _: &mut OngybarState) -> f64 {
-        return self.width;
+    fn get_size(&self, _: &mut C, height: u32, _: &mut OngybarState) -> f64 {
+        return self.width / 100.0 * height as f64;
     }
 
     fn do_render(&self, g: &mut G, height: u32, _: &mut OngybarState,
