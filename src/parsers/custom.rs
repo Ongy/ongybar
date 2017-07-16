@@ -39,12 +39,14 @@ fn parse_text<R> (r: &mut R) -> OngyStr
 
     let len = r.read_u16::<byteorder::NativeEndian>().unwrap();
 
-    let mut read_buf = Vec::with_capacity(len as usize + 1);
-    let _ = r.read_exact(read_buf.as_mut_slice());
+    let mut read_buf = Vec::new();
+    read_buf.resize(len as usize + 1, 0);
+
+    r.read_exact(read_buf.as_mut_slice()).unwrap();
     let _ = read_buf.pop();
 
     match String::from_utf8(read_buf) {
-        Ok(x) => OngyStr(x),
+        Ok(x) => return OngyStr(x),
         Err(x) => {
             println!("Error while decoding string from custom format: {:?}", x);
             return OngyStr(String::from("ERR"));
@@ -97,7 +99,7 @@ fn parse_elem<G, C, R> (r: &mut R) -> Option<Box<Renderable<G, C>>>
           G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
           R: std::io::Read {
     /* Ok, we will read one element at a time. So we first read in the type enum value */
-    let mut type_enum = [1];
+    let mut type_enum = [0;1];
     let _ = r.read(&mut type_enum);
     match type_enum[0] {
         0 => return Some(Box::new(custom_parse(r))),

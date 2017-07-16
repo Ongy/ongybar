@@ -21,7 +21,7 @@ impl<G, C> Renderable<G, C> for OngyRect
                  trans: &graphics::math::Matrix2d, _: &mut C,
                  c: graphics::types::Color) -> f64 {
         // This will be in pixels for now. Percent will probably go into another type
-        let dims = [0.0, height as f64 / 2.0 - self.height / 2.0, self.width, height as f64 / 2.0 + self.height / 2.0];
+        let dims = [0.0, height as f64 / 2.0 - self.height / 2.0, self.width, height as f64];
         graphics::rectangle(c, dims, trans.trans(0f64, 0f64), g);
         return self.width;
     }
@@ -46,7 +46,7 @@ impl<G, C> Renderable<G, C> for OngyRectR
         // This will be in pixels for now. Percent will probably go into another type
         let real_height = self.height / 100.0 * height as f64;
         let real_width = self.width / 100.0 * height as f64;
-        let dims = [0.0, height as f64 / 2.0 - real_height / 2.0, real_width, height as f64 / 2.0 + real_height / 2.0];
+        let dims = [0.0, height as f64 / 2.0 - real_height / 2.0, real_width, real_height];
         graphics::rectangle(c, dims, trans.trans(0f64, 0f64), g);
         return real_width;
     }

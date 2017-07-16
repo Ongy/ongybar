@@ -88,7 +88,7 @@ fn main() {
 
         let child = Command::new("monky")
             .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            //.stderr(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped()).spawn().unwrap();
         let stdout = child.stdout.unwrap();
         let fd = stdout.as_raw_fd();

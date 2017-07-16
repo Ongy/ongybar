@@ -21,7 +21,7 @@ Name (Enum Value):
 Special types:
   u#: unsigned int of size #bits
   var: a variable type, usually bound to some enum value
-  str: A string. Encoded utf8, null terminated and leading 2byte length
+  str: A string. Encoded utf8, null terminated and leading 2byte byte length
 
 elem: Element with type enum
   u8: type
