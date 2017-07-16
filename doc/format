@@ -1,0 +1,53 @@
+This is the documentation of the binary used to read in data from complying
+sources.
+
+TODO: Evaluate this!
+Note: Because of the implicit size of elements, this is not forward compatible.
+It may be interesting to add a size argument to element.
+
+The bar expects an (infinite) sequence of Lists on the pipe. The lists have the
+number of elements encoded, so there's no special delimiter between the lists.
+
+All elements have a size defined by their type. The type of an element is
+usually known ahead of time.
+
+Multibyte values encoded in host byteorder. If this is sent over the network in
+some way, the network adapter has to understand it and translate it properly!
+
+In this document, The format is:
+Name (Enum Value):
+  (type: comment)+
+
+Special types:
+  u#: unsigned int of size #bits
+  var: a variable type, usually bound to some enum value
+  str: A string. Encoded utf8, null terminated and leading 2byte length
+
+elem: Element with type enum
+  u8: type
+  var: The element
+
+Lists (0): A list of elements
+  u8: Number of elements
+  data+: Sequence of elements
+
+Text (1): A string that should be displayed as is
+  str: The text
+
+Image (2): A path to an image on the file system
+  str: Path tot the image (for now absolute)
+
+Colorfrag: The encoding of a single colour
+  u8: Red
+  u8: Green
+  u8: Blue
+  u8: Alpha
+
+Color (3): Sets the colour of contained the element
+  Colorfrag: Foreground
+  Colorfrag: Background
+  elem: The contained element
+
+Rect (4): A simple box, will be vertically centered, size in pixels
+  u16: width
+  u16: height

@@ -455,11 +455,6 @@ unsafe fn handle_event<F, G>(win: &X11Window,
                         set_geometry(win, d.x() as i32, d.y() as i32, d.width() as u32, 16);
                     }
                 }
-//                println!("received CRTC_NOTIFY event:\n\
-//                         \ttimestamp: {}, window: {}, crtc: {}, mode: {}, rotation: {}\n\
-//                         \tx: {}, y: {}, width: {}, height: {}",
-//                         d.timestamp(), d.window(), d.crtc(), d.mode(), d.rotation(),
-//                         d.x(), d.y(), d.width(), d.height());
             } else {
                 println!("Xrandr would be: {} + {}", win.randr_ev, xcb::randr::NOTIFY);
                 println!("Got an unkown event!: {}", ev_type);

@@ -8,7 +8,8 @@ mod parsers;
 use modules::renderable::{Renderable, OngybarState};
 use modules::separator::Separator;
 
-use parsers::dzen::dzen_parse;
+//use parsers::dzen::dzen_parse;
+use parsers::custom::custom_parse;
 
 use graphics::Transformed;
 use std::boxed::Box;
@@ -53,24 +54,17 @@ fn read_pipe<G, C, R>(reader: &mut R, str_list: &mut LinkedList<Box<Renderable<G
           G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
           R: BufRead {
     let mut first = true;
-    let mut buffer = String::new();
-    let _ = reader.read_line(&mut buffer);
+    let new_list = custom_parse(reader);
 
-
-    let new_list = buffer.trim().split("|").map(|x| dzen_parse(x));
-    //let new_list = buffer.trim().split("|").map(|x| Box::new(OngyStr(String::from(x))));
-
-    let mut list = str_list;
-
-    list.clear();
+    str_list.clear();
     for b in new_list {
         if first {
             first = false;
         } else {
-            list.push_back(Box::new(Separator));
+            str_list.push_back(Box::new(Separator));
         }
 
-        list.push_back(Box::new(b));
+        str_list.push_back(b);
     }
 
     return true;
