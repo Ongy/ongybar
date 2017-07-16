@@ -14,6 +14,14 @@ usually known ahead of time.
 Multibyte values encoded in host byteorder. If this is sent over the network in
 some way, the network adapter has to understand it and translate it properly!
 
+{{{
+Protocol = { List }
+Elem = 
+
+-- The u8 is the number of elements in the list
+List = u8 { Elem }
+}}}
+
 In this document, The format is:
 Name (Enum Value):
   (type: comment)+
@@ -22,6 +30,8 @@ Special types:
   u#: unsigned int of size #bits
   var: a variable type, usually bound to some enum value
   str: A string. Encoded utf8, null terminated and leading 2byte byte length
+
+
 
 elem: Element with type enum
   u8: type
@@ -51,3 +61,24 @@ Color (3): Sets the colour of contained the element
 Rect (4): A simple box, will be vertically centered, size in pixels
   u16: width
   u16: height
+
+DrawType:
+  Absolute: Interpret the coordinates as absolut pixels
+  Relative: Interpret coordinates as relative in 1/100. x will be relative to
+    height. so 10x10 will be a square with 1/10th the height as length.
+  SemiRelative: Absolute x but relative y
+
+Commands:
+-- Top left x/y, bottom right x/y
+  Rect (1): u16 u16 u16 u16
+-- Start x/y, end x/y, width
+  Line (2): u16 u16 u16 u16 u16
+  Colored (3): ColorFrag Command
+
+Command:
+  u8: Command Index
+  var: Arguments
+
+Draw (5): Simple draw commands
+  DrawType: How should the coordinates be interpreted
+  List<Command>: A list of draw commands

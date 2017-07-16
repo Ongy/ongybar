@@ -5,3 +5,4 @@ pub mod ongypos;
 pub mod separator;
 pub mod ongyrect;
 pub mod ongyimage;
+pub mod ongydraw;

@@ -14,6 +14,7 @@ use modules::ongystr::OngyStr;
 use modules::ongyimage::OngyImage;
 use modules::ongyrect::OngyRectR;
 use modules::colored::Colored;
+use modules::ongydraw::*;
 
 use std;
 use std::vec::Vec;
@@ -23,6 +24,17 @@ struct CustomIter<'a, G, C, R: 'a> {
     num: Option<u8>,
     g: std::marker::PhantomData<G>,
     c: std::marker::PhantomData<C>,
+}
+
+struct DrawIter<'a, R: 'a> {
+    r: &'a mut R,
+    num: u8,
+}
+
+impl<'a, R> DrawIter<'a, R> {
+    fn new(read: &'a mut R, num: u8) -> Self {
+        DrawIter {r: read, num: num}
+    }
 }
 
 impl<'a, G, C, R> CustomIter<'a, G, C, R> {
@@ -97,6 +109,72 @@ fn parse_rect<R> (r: &mut R) -> OngyRectR
     return OngyRectR { width: width as f64, height: height as f64 }
 }
 
+fn parse_draw_elem<R> (r: &mut R) -> DrawCommand
+    where R: std::io::Read {
+
+    let mut type_enum = [0xff;1];
+    let _ = r.read(&mut type_enum);
+    match type_enum[0] {
+        1 => { /* 1 is the Rectangle */
+            let x1 = r.read_u16::<byteorder::NativeEndian>().unwrap();
+            let y1 = r.read_u16::<byteorder::NativeEndian>().unwrap();
+            let x2 = r.read_u16::<byteorder::NativeEndian>().unwrap();
+            let y2 = r.read_u16::<byteorder::NativeEndian>().unwrap();
+
+            return DrawCommand::Rect(
+                    DrawRect::new(
+                        x1 as f64,
+                        y1 as f64,
+                        x2 as f64,
+                        y2 as f64));
+        }
+        3 => { /* 3 is a coloured element */
+            let color = parse_colorfrag(r);
+            let val = parse_draw_elem(r);
+            return DrawCommand::Col(DrawCol::new(val, color));
+        }
+        x => {
+            println!("Found something I can't work with :( {}", x);
+            return DrawCommand::Rect(DrawRect::new(0.0, 0.0, 0.0, 0.0));
+        }
+    }
+}
+
+impl<'a, R> Iterator for DrawIter<'a, R>
+    where R: std::io::Read {
+    type Item=DrawCommand;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.num < 1 {
+            return None;
+        }
+        self.num = self.num - 1;
+
+        return Some(parse_draw_elem(self.r));
+    }
+}
+
+fn parse_draw<R> (r: &mut R) -> OngyDraw
+    where R: std::io::Read {
+    let mut buffer = [1];
+    let _ = r.read(&mut buffer);
+
+    let coords = match buffer[0] {
+        0 => Coordtype::Absolute,
+        1 => Coordtype::Relative,
+        2 => Coordtype::SemiRelative,
+        x => {
+                println!("Found unused coord type while parsing OngyDraw: {}", x);
+                println!("Defaulting to relative");
+                Coordtype::Relative
+            },
+    };
+
+    let _ = r.read(&mut buffer);
+
+    return OngyDraw::new(coords, DrawIter::new(r, buffer[0]));
+}
+
 fn parse_elem<G, C, R> (r: &mut R) -> Option<Box<Renderable<G, C>>>
     where C: graphics::character::CharacterCache<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
           G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
@@ -110,6 +188,7 @@ fn parse_elem<G, C, R> (r: &mut R) -> Option<Box<Renderable<G, C>>>
         2 => return Some(Box::new(parse_image(r))),
         3 => return Some(Box::new(parse_color(r))),
         4 => return Some(Box::new(parse_rect(r))),
+        5 => return Some(Box::new(parse_draw(r))),
         x => {
             println!("Found a type I couldn't interpret while parsing custom format: {}", x);
             return None
