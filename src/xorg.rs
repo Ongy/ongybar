@@ -175,6 +175,17 @@ unsafe fn set_struts(conn: &xcb::Connection, win: c_uint, x: i16, _: i16, width:
 
 }
 
+unsafe fn set_geometry(win: &X11Window, x: i32, y: i32, width: u32, height: u32) {
+    let values = [(xlib::CWX, x as u32),
+                  (xlib::CWY, y as u32),
+                  (xlib::CWWidth, width),
+                  (xlib::CWHeight, height)
+                 ];
+    let _ = xcb::xproto::configure_window(&win.conn, win.win, &values);
+
+    set_struts(&win.conn, win.win, x as i16, y as i16, width as u16, height as u16);
+}
+
 unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
     let (conn, screen_num) = xcb::Connection::connect_with_xlib_display().unwrap();
     conn.set_event_queue_owner(xcb::EventQueueOwner::Xcb);
@@ -228,7 +239,6 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
     let mut height = 0;
     let cmap = conn.generate_id();
     let win = conn.generate_id();
-
 
     {
         let setup = conn.get_setup();
@@ -435,11 +445,21 @@ unsafe fn handle_event<F, G>(win: &X11Window,
             } else if ev_type == win.randr_ev + xcb::randr::NOTIFY {
                 let v: &xcb::randr::NotifyEvent = xcb::cast_event(&ev);
                 let d = v.u().cc();
-                println!("received CRTC_NOTIFY event:\n\
-                         \ttimestamp: {}, window: {}, crtc: {}, mode: {}, rotation: {}\n\
-                         \tx: {}, y: {}, width: {}, height: {}",
-                         d.timestamp(), d.window(), d.crtc(), d.mode(), d.rotation(),
-                         d.x(), d.y(), d.width(), d.height());
+                let crtc = xcb::randr::get_crtc_info(&win.conn, d.crtc(), 0).get_reply().unwrap();
+                for output in crtc.outputs() {
+                    let o = xcb::randr::get_output_info(&win.conn, *output, 0).get_reply().unwrap();
+                    let name = String::from_utf8_lossy(o.name());
+                    println!("Changed config for output: {}", name);
+                    /* TODO: This should be from config, not hardcoded! */
+                    if name == "LVDS1" {
+                        set_geometry(win, d.x() as i32, d.y() as i32, d.width() as u32, 16);
+                    }
+                }
+//                println!("received CRTC_NOTIFY event:\n\
+//                         \ttimestamp: {}, window: {}, crtc: {}, mode: {}, rotation: {}\n\
+//                         \tx: {}, y: {}, width: {}, height: {}",
+//                         d.timestamp(), d.window(), d.crtc(), d.mode(), d.rotation(),
+//                         d.x(), d.y(), d.width(), d.height());
             } else {
                 println!("Xrandr would be: {} + {}", win.randr_ev, xcb::randr::NOTIFY);
                 println!("Got an unkown event!: {}", ev_type);
