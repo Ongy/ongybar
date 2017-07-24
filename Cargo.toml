@@ -22,3 +22,10 @@ features = ["xlib_xcb", "dri2", "randr"]
 [dependencies.x11]
 version = "2.14"
 features = ["xlib", "glx"]
+
+[dependencies.rs-config]
+git = "https://github.com/Ongy/config-rs"
+
+[dependencies.rs-config-derive]
+version= "*"
+git = "https://github.com/Ongy/config-rs"
