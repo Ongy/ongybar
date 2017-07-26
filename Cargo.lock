@@ -16,6 +16,7 @@ dependencies = [
  "rs-config-derive 0.1.0 (git+https://github.com/Ongy/config-rs)",
  "x11 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xcb 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -494,7 +495,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "rs-config"
 version = "0.1.0"
-source = "git+https://github.com/Ongy/config-rs#869d13ea98a51b445fb26a42c0af2e89443fca33"
+source = "git+https://github.com/Ongy/config-rs#6c59109a0ce296638ba566acab3ac94f53246b7f"
 dependencies = [
  "rs-config-derive 0.1.0 (git+https://github.com/Ongy/config-rs)",
 ]
@@ -502,7 +503,7 @@ dependencies = [
 [[package]]
 name = "rs-config-derive"
 version = "0.1.0"
-source = "git+https://github.com/Ongy/config-rs#869d13ea98a51b445fb26a42c0af2e89443fca33"
+source = "git+https://github.com/Ongy/config-rs#6c59109a0ce296638ba566acab3ac94f53246b7f"
 dependencies = [
  "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -636,6 +637,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "xdg"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "xml-rs"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -726,4 +732,5 @@ dependencies = [
 "checksum ws2_32-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d59cefebd0c892fa2dd6de581e937301d8552cb44489cdff035c6187cb63fa5e"
 "checksum x11 2.14.0 (registry+https://github.com/rust-lang/crates.io-index)" = "db27c597c187da52194a4b8232e7d869503911aab9ff726fefb76d7a830f78ed"
 "checksum xcb 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)" = "63e3a849b73e4e1905e4f4d48f1750429bc86ea9f473632ab382a6f69ecb6b33"
+"checksum xdg 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a66b7c2281ebde13cf4391d70d4c7e5946c3c25e72a7b859ca8f677dcd0b0c61"
 "checksum xml-rs 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "7ec6c39eaa68382c8e31e35239402c0a9489d4141a8ceb0c716099a0b515b562"

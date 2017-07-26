@@ -10,14 +10,11 @@ mod config;
 mod modules;
 mod parsers;
 
-use rs_config::ConfigAble;
-use rs_config::ConfigProvider;
-
 use modules::renderable::{Renderable, OngybarState};
 use modules::separator::Separator;
 use modules::ongystr::OngyStr;
 
-//use parsers::dzen::dzen_parse;
+use parsers::dzen::dzen_parse;
 use parsers::custom::custom_parse;
 
 use graphics::Transformed;
@@ -27,10 +24,10 @@ use std::collections::linked_list::LinkedList;
 use std::io::{BufRead, BufReader};
 use std::ops::DerefMut;
 use std::os::raw::*;
-use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
-//use std::process::Command;
 
+//use std::process::Command;
+//use std::os::unix::io::AsRawFd;
 use std::os::unix::io::FromRawFd;
 use std::ops::Deref;
 
@@ -97,27 +94,6 @@ fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>, o:
     });
 }
 
-//fn read_pipe<G, C, R>(reader: &mut R, str_list: &mut LinkedList<Box<Renderable<G, C>>>) -> bool
-//    where C: graphics::character::CharacterCache<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture>  + 'static,
-//          G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static,
-//          R: BufRead {
-//    let mut first = true;
-//    let new_list = custom_parse(reader);
-//
-//    str_list.clear();
-//    for b in new_list {
-//        if first {
-//            first = false;
-//        } else {
-//            str_list.push_back(Box::new(Separator));
-//        }
-//
-//        str_list.push_back(b);
-//    }
-//
-//    return true;
-//}
-
 fn make_update_action<G, C>(source: &config::InputSource,
                             parser: &config::Parser,
                             list: Rc<RefCell<LinkedList<Box<Renderable<G, C>>>>>)
@@ -126,7 +102,9 @@ fn make_update_action<G, C>(source: &config::InputSource,
           G: graphics::Graphics<Texture = <opengl_graphics::GlGraphics as graphics::Graphics>::Texture> + 'static, {
 
     let fd = match source {
+        /* STDIN is on FD 0, by definition */
         &config::InputSource::Stdin => 0,
+        /* PIPE tells us to read from a fd passed by someone else */
         &config::InputSource::Pipe(fd) => fd,
         x => {
             panic!("Sorry I didn't implement getting output for {:?} yet :(", x);
@@ -134,6 +112,7 @@ fn make_update_action<G, C>(source: &config::InputSource,
 
     };
 
+    // TODO: Combine the paths!
     let fun = match parser {
         &config::Parser::Plain => {
             let mut reader = BufReader::new(unsafe {std::fs::File::from_raw_fd(fd)} );
@@ -147,11 +126,61 @@ fn make_update_action<G, C>(source: &config::InputSource,
 
                 return true;
             };
+            Box::new(fun) as Box<FnMut() -> bool>
+        },
+        &config::Parser::Ongybar => {
+            let mut reader = BufReader::new(unsafe {std::fs::File::from_raw_fd(fd)} );
+            let mut first = true;
+
+            let fun = move || {
+                let mut mut_list = list.borrow_mut();
+                mut_list.deref_mut().clear();
+
+                let new_list = custom_parse(&mut reader);
+
+                mut_list.clear();
+                for b in new_list {
+                    if first {
+                        first = false;
+                    } else {
+                        mut_list.push_back(Box::new(Separator));
+                    }
+
+                    mut_list.push_back(b);
+                }
+
+                return true;
+            };
 
             Box::new(fun) as Box<FnMut() -> bool>
         },
-        x => {
-            panic!("Sorry I didn't implement parsing for {:?} yet :(", x);
+        &config::Parser::Dzen => {
+            let mut reader = BufReader::new(unsafe {std::fs::File::from_raw_fd(fd)} );
+            let mut first = true;
+
+            let fun = move || {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut mut_list = list.borrow_mut();
+                mut_list.deref_mut().clear();
+
+                let new_list = dzen_parse(line.trim());
+
+                mut_list.clear();
+                for b in new_list {
+                    if first {
+                        first = false;
+                    } else {
+                        mut_list.push_back(Box::new(Separator));
+                    }
+
+                    mut_list.push_back(b);
+                }
+
+                return true;
+            };
+
+            Box::new(fun) as Box<FnMut() -> bool>
         },
     };
 
@@ -186,8 +215,8 @@ fn make_outputs<G, C>(conf: &config::Config) -> (Vec<(c_int, Box<FnMut() -> bool
 
 #[allow(unreachable_code)]
 fn main() {
-    let mut provider = ConfigProvider::<String>::new_from_str("{}");
-    let config = config::Config::parse_from(&mut provider, &mut |x: String| {println!("{}", x)}).unwrap();
+    let config = rs_config::read_or_exit("/home/ongy/.config/ongybar/config");
+    //let config = config::Config::parse_from(&mut provider, &mut |x: String| {println!("{}", x)}).unwrap();
 
     let (updates, outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config);
 
