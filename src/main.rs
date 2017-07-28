@@ -28,8 +28,8 @@ use std::ops::DerefMut;
 use std::os::raw::*;
 use std::rc::Rc;
 
-//use std::process::Command;
-//use std::os::unix::io::AsRawFd;
+use std::process::Command;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::io::FromRawFd;
 use std::ops::Deref;
 
@@ -108,10 +108,21 @@ fn make_update_action<G, C>(source: &config::InputSource,
         &config::InputSource::Stdin => 0,
         /* PIPE tells us to read from a fd passed by someone else */
         &config::InputSource::Pipe(fd) => fd,
+        &config::InputSource::Spawn(ref name) => {
+            let child = Command::new(name)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped()).spawn().unwrap();
+            let stdout = child.stdout.unwrap();
+            let fd = stdout.as_raw_fd();
+
+            std::mem::forget(stdout);
+
+            println!("Spawned {} on fd: {}", name, fd);
+            fd
+        },
         x => {
             panic!("Sorry I didn't implement getting output for {:?} yet :(", x);
         },
-
     };
 
     // TODO: Combine the paths!
@@ -132,9 +143,9 @@ fn make_update_action<G, C>(source: &config::InputSource,
         },
         &config::Parser::Ongybar => {
             let mut reader = BufReader::new(unsafe {std::fs::File::from_raw_fd(fd)} );
-            let mut first = true;
 
             let fun = move || {
+                let mut first = true;
                 let mut mut_list = list.borrow_mut();
                 mut_list.deref_mut().clear();
 
@@ -158,9 +169,9 @@ fn make_update_action<G, C>(source: &config::InputSource,
         },
         &config::Parser::Dzen => {
             let mut reader = BufReader::new(unsafe {std::fs::File::from_raw_fd(fd)} );
-            let mut first = true;
 
             let fun = move || {
+                let mut first = true;
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 let mut mut_list = list.borrow_mut();

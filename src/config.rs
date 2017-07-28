@@ -1,6 +1,24 @@
 use rs_config;
 use rs_config::ConfigAble;
 
+
+#[derive(Debug, Clone, ConfigAble)]
+pub enum Size {
+    Pixels(i32),
+    Percent(i32),
+    Font(i32),
+}
+
+impl Size {
+    pub fn get_height(&self, mon: i32) -> i32 {
+        match self {
+            &Size::Pixels(ref size) => *size,
+            &Size::Percent(ref size) => mon * *size / 100,
+            &Size::Font(ref size) => *size * 3 /2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, ConfigAble)]
 pub enum Parser {
     Dzen,
@@ -66,6 +84,8 @@ pub struct Config {
     pub inputs: Vec<Input>,
     #[ConfigAttrs(default = "\"ongybar\".to_string()")]
     pub title: String,
+    #[ConfigAttrs(default = "Size::Pixels(20)")]
+    pub size: Size
 }
 
 /// Get the default config
