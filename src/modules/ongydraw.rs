@@ -35,8 +35,8 @@ pub struct DrawRect {
 
 impl DrawRect {
     fn get_width(&self, height: u32, coords: Coordtype) -> f64{
-        let (_, y) = coords.transform(self.x2 - self.x1, self.y2 - self.y1, height);
-        return y;
+        let (x, _) = coords.transform(self.x2 - self.x1, self.y2 - self.y1, height);
+        return x;
     }
 
     fn do_render<G> (&self, g: &mut G, height: u32, coords: Coordtype,
