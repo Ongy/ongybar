@@ -5,6 +5,8 @@ extern crate rs_config;
 extern crate graphics;
 extern crate opengl_graphics;
 
+extern crate xdg;
+
 mod xorg;
 mod config;
 mod modules;
@@ -213,10 +215,33 @@ fn make_outputs<G, C>(conf: &config::Config) -> (Vec<(c_int, Box<FnMut() -> bool
     return (updates, outs);
 }
 
-#[allow(unreachable_code)]
+fn parse_or_default_config() -> config::Config {
+    let xdg_base = match xdg::BaseDirectories::with_prefix("ongybar") {
+        Ok(x) => x,
+        Err(x) => {
+            println!("Couldn't get XDG config to search for config: {}", x);
+            return config::get_default();
+        },
+    };
+
+    match xdg_base.find_config_file("config") {
+        Some(x) => {
+            if let Some(y) = x.to_str() {
+                println!("Using config: {}", y);
+            } else {
+                println!("Couldn't decode path into string. This sounds fancy!");
+            }
+
+            return rs_config::read_or_exit(x);
+        },
+        None => {
+            return config::get_default();
+        },
+    }
+}
+
 fn main() {
-    let config = rs_config::read_or_exit("/home/ongy/.config/ongybar/config");
-    //let config = config::Config::parse_from(&mut provider, &mut |x: String| {println!("{}", x)}).unwrap();
+    let config = parse_or_default_config();
 
     let (updates, outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config);
 

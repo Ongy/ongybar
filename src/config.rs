@@ -67,3 +67,10 @@ pub struct Config {
     #[ConfigAttrs(default = "\"ongybar\".to_string()")]
     pub title: String,
 }
+
+/// Get the default config
+pub fn get_default() -> Config {
+    println!("Running default config");
+    /* This unwrap Is fine. It's guaranteed to exist */
+    return Config::get_default().unwrap();
+}
