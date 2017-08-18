@@ -45,55 +45,61 @@ struct Window<G, C> {
 }
 
 fn render_middle<G, C, R>(g: &mut G, obj: &R, o: &mut OngybarState, c : &mut C,
-                          trans: &graphics::math::Matrix2d, height: u32)
+                          trans: &graphics::math::Matrix2d, height: u32) -> f64
     where R: Renderable<G, C> {
     let size = obj.get_size(c, height, o);
 
-    obj.do_render(g, height, o, &trans.trans(-size / 2.0, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
+    return obj.do_render(g, height, o, &trans.trans(-size / 2.0, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
 }
 
 fn render_right<G, C, R>(g: &mut G, obj: &R, o: &mut OngybarState, c : &mut C,
-                         trans: &graphics::math::Matrix2d, height: u32)
+                         trans: &graphics::math::Matrix2d, height: u32) -> f64
     where R: Renderable<G, C> {
     let size = obj.get_size(c, height, o);
-    obj.do_render(g, height, o, &trans.trans(-size, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
+    return obj.do_render(g, height, o, &trans.trans(-size, 0f64), c, [0.8, 0.8, 0.8, 1.0]);
 }
 
 fn draw_window<'a>(glyphs: &mut opengl_graphics::glyph_cache::GlyphCache<'a>, o: &mut OngybarState,
                    win: &Window<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache<'a>>,
                    graphics : &mut opengl_graphics::GlGraphics,
                    width: u32, height: u32) {
-    let viewport = graphics::Viewport { rect: [0, 0, width as i32, height as i32],
-                                        draw_size: [width, height],
-                                        window_size: [width, height] };
-    graphics.draw(viewport, |c, g| {
-        graphics::clear(graphics::color::BLACK, g);
-        for ref output in &win.outputs {
+    /* The amount of space covered from the left */
+    let mut cover_left = 0.0;
+    /* The amount of space covered from the right */
+    let mut cover_right = 0.0;
+
+    /* First clear the graphics context */
+    graphics::clear(graphics::color::BLACK, graphics);
+
+    /* We draw each output */
+    for ref output in &win.outputs {
+        /* The width still available after deducting covered areas from both sides */
+        let width = width as f64 - cover_left - cover_right;
+        /* The rectangle we can draw in now */
+        let draw_rect = [cover_left as i32, 0, width as i32, height as i32];
+        /* The actual GL viewport that will be used for drawing the output */
+        let viewport = graphics::Viewport { rect: draw_rect,
+                                            draw_size: [width as u32, height],
+                                            window_size: [width as u32, height] };
+
+        graphics.draw(viewport, |c, g| {
+            /* Draw the current output */
             let cell = output.content.borrow();
             let list = cell.deref();
             match &output.position {
-                &config::Anchor::Static(ref x) => {
-                    match x {
-                        &config::StaticPosition::Left => {
-                            list.do_render(g, height, o, &c.transform, glyphs, [0.8, 0.8, 0.8, 1.0]);
-                        },
-                        &config::StaticPosition::Right => {
-                            render_right(g, list, o, glyphs, &c.transform.trans(width as f64, 0f64), height);
-                        },
-                        &config::StaticPosition::Middle => {
-                            render_middle(g, list, o, glyphs, &c.transform.trans(width as f64 / 2.0, 0f64), height);
-                        },
-                        x => {
-                            panic!("Sorry, can't layout {:?} yet :(", x);
-                        },
-                    }
+                &config::Anchor::Left => {
+                    cover_left += list.do_render(g, height, o, &c.transform, glyphs, [0.8, 0.8, 0.8, 1.0]) + height as f64 / 2.0;
                 },
-                x => {
-                    panic!("Sorry, can't layout {:?} yet :(", x);
+                &config::Anchor::Right => {
+                    cover_right += render_right(g, list, o, glyphs, &c.transform.trans(width, 0f64), height) + height as f64 / 2.0;
+                },
+                /* TODO: Make this work with the covering $foo */
+                &config::Anchor::Middle => {
+                    let _ = render_middle(g, list, o, glyphs, &c.transform.trans(width / 2.0, 0f64), height);
                 },
             }
-        }
-    });
+        });
+    }
 }
 
 fn make_update_action<G, C>(source: &config::InputSource,
@@ -254,16 +260,14 @@ fn parse_or_default_config() -> config::Config {
 fn main() {
     let config = parse_or_default_config();
 
-    let (updates, outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config);
-
+    let (updates, mut outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config); 
     let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
+    outputs.sort_by_key(|ref output| -output.layer);
     let win = Window { outputs: outputs };
     let mut state = OngybarState::new();
 
-    {
-        xorg::do_x11main(|g, w, h| {
-                             draw_window(&mut glyphs, &mut state, &win, g, w, h); },
-                         || opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0),
-                         updates.into_iter());
-    }
+    xorg::do_x11main(|g, w, h| {
+                         draw_window(&mut glyphs, &mut state, &win, g, w, h); },
+                     || opengl_graphics::GlGraphics::new(opengl_graphics::OpenGL::V3_0),
+                     updates.into_iter(), config.size, config.position);
 }

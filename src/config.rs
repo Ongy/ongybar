@@ -27,19 +27,10 @@ pub enum Parser {
 }
 
 #[derive(Debug, Clone, ConfigAble)]
-pub enum StaticPosition {
+pub enum Anchor {
     Left,
     Right,
-    Middle,
-    MiddleLeft,
-    MiddleRight,
-}
-
-#[derive(Debug, Clone, ConfigAble)]
-pub enum Anchor {
-    Static(StaticPosition),
-    LeftOf(String),
-    RightOf(String),
+    Middle
 }
 
 #[derive(Debug, ConfigAble)]
@@ -80,11 +71,11 @@ pub struct Input {
 pub struct Config {
     #[ConfigAttrs(default = "Position::Global(Direction::Top)")]
     pub position: Position,
-    #[ConfigAttrs(default = "vec![Input {source: InputSource::Stdin, layer: 0, name: \"\".into(), parser: Parser::Plain, position: Anchor::Static(StaticPosition::Middle)}]")]
+    #[ConfigAttrs(default = "vec![Input {source: InputSource::Stdin, layer: 0, name: \"\".into(), parser: Parser::Plain, position: Anchor::Middle}]")]
     pub inputs: Vec<Input>,
     #[ConfigAttrs(default = "\"ongybar\".to_string()")]
     pub title: String,
-    #[ConfigAttrs(default = "Size::Pixels(20)")]
+    #[ConfigAttrs(default = "Size::Pixels(16)")]
     pub size: Size
 }
 

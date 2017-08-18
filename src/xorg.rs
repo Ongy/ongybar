@@ -5,12 +5,15 @@ extern crate gl;
 extern crate libc;
 extern crate hostname;
 
+use ::config;
+
 use self::mio::*;
 use self::x11::glx::*;
 use self::x11::xlib;
 use self::xcb::dri2;
 
 use std;
+use std::borrow::Borrow;
 use std::boxed::Box;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -186,7 +189,64 @@ unsafe fn set_geometry(win: &X11Window, x: i32, y: i32, width: u32, height: u32)
     set_struts(&win.conn, win.win, x as i16, y as i16, width as u16, height as u16);
 }
 
-unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
+fn is_better_mon(ox: i16, oy: i16, nx: i16, ny: i16, dir: &config::Direction) -> bool {
+    return false;
+}
+
+fn is_viable_mon(name: &str, pos: &config::Position) -> bool {
+    match pos {
+        &config::Position::Global(_) => true,
+        &config::Position::Monitor(ref val, _) => val == name,
+    }
+}
+
+unsafe fn get_position_and_size(conn: &xcb::Connection, root: u32, size: config::Size, pos: &config::Position)
+                                -> (i16, i16, u16, u16) {
+    let screen_res_cookie = xcb::randr::get_screen_resources(&conn, root);
+    let screen_res_reply = screen_res_cookie.get_reply().unwrap();
+    let outputs = screen_res_reply.outputs();
+
+    let mut output_cookies = Vec::with_capacity(outputs.len());
+    for output in outputs {
+        output_cookies.push(xcb::randr::get_output_info(&conn, *output, 0));
+    }
+
+    let mut x = 0;
+    let mut y = 0;
+    let mut width = 0;
+    let mut height = 0;
+
+    for out_cookie in output_cookies.iter() {
+        if let Ok(reply) = out_cookie.get_reply() {
+            /* Filter out unplugged outputs
+             * and outputs that aren't set up (yet)
+             */
+            if reply.connection() != 0  || reply.crtc() == 0 {
+                continue;
+            }
+
+            let name = String::from_utf8_lossy(reply.name());
+            println!(" Output:\t{}", name);
+
+            if !is_viable_mon(name.borrow(), pos) {
+                continue;
+            }
+
+            let crtc = xcb::randr::get_crtc_info(&conn, reply.crtc(), 0).get_reply().unwrap();
+            println!("\t{}x{}+{}x{}", crtc.width(), crtc.height(), crtc.x(), crtc.y());
+
+
+            height = size.get_height(crtc.height() as i32) as u16;
+            width = crtc.width();
+            x = crtc.x();
+            y = crtc.y();
+        }
+    }
+
+    return (x, y, width, height);
+}
+
+unsafe fn create_window(size: config::Size, pos: &config::Position) -> (X11Window, *mut __GLXFBConfigRec) {
     let (conn, screen_num) = xcb::Connection::connect_with_xlib_display().unwrap();
     conn.set_event_queue_owner(xcb::EventQueueOwner::Xcb);
 
@@ -235,51 +295,16 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
         (p, dw)
     };
 
-    let mut width = 0;
-    let mut height = 0;
     let cmap = conn.generate_id();
     let win = conn.generate_id();
+    let ret_width;
+    let ret_height;
 
     {
         let setup = conn.get_setup();
         let screen = setup.roots().nth((*vi).screen as usize).unwrap();
 
         let _ = xcb::randr::select_input(&conn, screen.root(), xcb::randr::NOTIFY_MASK_CRTC_CHANGE as u16).request_check();
-
-        let screen_res_cookie = xcb::randr::get_screen_resources(&conn, screen.root());
-        let screen_res_reply = screen_res_cookie.get_reply().unwrap();
-        let outputs = screen_res_reply.outputs();
-
-        let mut output_cookies = Vec::with_capacity(outputs.len());
-        for output in outputs {
-            output_cookies.push(xcb::randr::get_output_info(&conn, *output, 0));
-        }
-
-        let mut x = 0;
-        let mut y = 0;
-
-        for out_cookie in output_cookies.iter() {
-            if let Ok(reply) = out_cookie.get_reply() {
-                /* Filter out unplugged outputs
-                 * and outputs that aren't set up (yet)
-                 */
-                if reply.connection() != 0  || reply.crtc() == 0 {
-                    continue;
-                }
-
-                let name = String::from_utf8_lossy(reply.name());
-                println!(" Output:\t{}", name);
-                let crtc = xcb::randr::get_crtc_info(&conn, reply.crtc(), 0).get_reply().unwrap();
-                println!("\t{}x{}+{}x{}", crtc.width(), crtc.height(), crtc.x(), crtc.y());
-
-                width = crtc.width();
-                //height = crtc.height();
-                height = 16;
-                x = crtc.x();
-                y = crtc.y();
-            }
-        }
-
         println!("Picking last one for now, since that's easiest to implement :)");
 
 
@@ -293,6 +318,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
             (xcb::CW_COLORMAP, cmap)
         ];
 
+        let (x, y, width, height)  = get_position_and_size(&conn, screen.root(), size, pos);
 
         xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(),
                            x, y, width, height,
@@ -300,6 +326,8 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
                            (*vi).visualid as u32, &cw_values);
 
         set_struts(&conn, win, x, y, width, height);
+        ret_width = width;
+        ret_height = height;
     }
 
     xlib::XFree(vi as *mut c_void);
@@ -327,7 +355,7 @@ unsafe fn create_window() -> (X11Window, *mut __GLXFBConfigRec) {
 
     let win = X11Window { conn: conn, win: win, dri2_ev: dri2_ev,
                           screen_num: screen_num, randr_ev: randr_base,
-                          height: height as u32, width: width as u32,
+                          height: ret_height as u32, width: ret_width as u32,
                           wm_protocols: wm_protocols, cmap: cmap,
                           wm_delete_window: wm_delete_window };
     return (win, fbc);
@@ -484,12 +512,13 @@ unsafe fn wait_event<F, G>(win: &X11Window,
     return false;
 }
 
-pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G)
+pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G, size: config::Size,
+                              position: config::Position)
     where F: FnMut(&mut V, u32, u32),
           L: FnOnce() -> V,
           G: std::iter::IntoIterator<Item=(c_int, Box<FnMut() -> bool>)> {
     unsafe {
-        let (win, fbc) = create_window();
+        let (win, fbc) = create_window(size, &position);
         let ctx = make_glcontext(&win, fbc);
         let graphics = create();
 
