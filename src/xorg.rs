@@ -22,10 +22,77 @@ use std::ops::DerefMut;
 use std::os::raw::*;
 use std::os::raw::{c_int, c_void};
 use std::ptr::null_mut;
+use std::cmp::Ordering;
 
 
 const GLX_CONTEXT_MAJOR_VERSION_ARB: u32 = 0x2091;
 const GLX_CONTEXT_MINOR_VERSION_ARB: u32 = 0x2092;
+
+#[derive(Debug)]
+struct Monitor {
+    name: String,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+}
+
+impl Monitor {
+    // TODO: Can this type be sanitized?
+    fn from_crtc(name: String, arg: xcb::Reply<xcb::ffi::randr::xcb_randr_get_crtc_info_reply_t>) -> Self {
+        Monitor{ name: name,
+                 x: arg.x(), y: arg.y(),
+                 width: arg.width(), height: arg.height() }
+    }
+
+    fn from_change(name: String, arg: xcb::randr::CrtcChange) -> Self {
+        Monitor{ name: name,
+                 x: arg.x(), y: arg.y(),
+                 width: arg.width(), height: arg.height() }
+    }
+
+    fn update_crtc(&mut self, arg: xcb::randr::CrtcChange) {
+         self.x = arg.x();
+         self.y = arg.y();
+         self.width = arg.width();
+         self.height = arg.height();
+    }
+}
+
+#[derive(Debug)]
+struct Geometry {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+}
+
+impl Geometry {
+    fn from_mon_with_conf(mon: &Monitor,
+                          size: &config::Size,
+                          direction: &config::Direction)
+                          -> Self {
+        match direction {
+            &config::Direction::Top    => Geometry {
+                x: mon.x,
+                y: mon.y,
+                width: mon.width,
+                height: size.get_height(mon.height as i32) as u16,
+            },
+            &config::Direction::Bottom => {
+                let height = size.get_height(mon.height as i32) as u16;
+                Geometry {
+                x: mon.x,
+                y: mon.y + mon.height as i16 - height as i16,
+                width: mon.width,
+                height: height,
+            }
+            },
+            &config::Direction::Left   => unimplemented!(),
+            &config::Direction::Right  => unimplemented!(),
+        }
+    }
+}
 
 struct X11Window {
     conn: xcb::Connection,
@@ -39,6 +106,8 @@ struct X11Window {
     dri2_ev: u8,
     randr_ev: u8,
     cmap: u32,
+
+    mons: Vec<Monitor>,
 }
 
 type GlXCreateContextAttribsARBProc =
@@ -178,7 +247,7 @@ unsafe fn set_struts(conn: &xcb::Connection, win: c_uint, x: i16, _: i16, width:
 
 }
 
-unsafe fn set_geometry(win: &X11Window, x: i32, y: i32, width: u32, height: u32) {
+unsafe fn set_geometry(win: &mut X11Window, x: i32, y: i32, width: u32, height: u32) {
     let values = [(xlib::CWX, x as u32),
                   (xlib::CWY, y as u32),
                   (xlib::CWWidth, width),
@@ -187,10 +256,17 @@ unsafe fn set_geometry(win: &X11Window, x: i32, y: i32, width: u32, height: u32)
     let _ = xcb::xproto::configure_window(&win.conn, win.win, &values);
 
     set_struts(&win.conn, win.win, x as i16, y as i16, width as u16, height as u16);
+    win.width = width;
+    win.height = height;
 }
 
-fn is_better_mon(ox: i16, oy: i16, nx: i16, ny: i16, dir: &config::Direction) -> bool {
-    return false;
+fn sort_mons(dir: &config::Direction, left: &Monitor, right: &Monitor) -> Ordering {
+    match dir {
+        &config::Direction::Top    => left.y.cmp(&right.y),
+        &config::Direction::Bottom => left.y.cmp(&right.y),
+        &config::Direction::Left   => left.x.cmp(&right.x),
+        &config::Direction::Right  => left.x.cmp(&right.x),
+    }
 }
 
 fn is_viable_mon(name: &str, pos: &config::Position) -> bool {
@@ -200,8 +276,7 @@ fn is_viable_mon(name: &str, pos: &config::Position) -> bool {
     }
 }
 
-unsafe fn get_position_and_size(conn: &xcb::Connection, root: u32, size: config::Size, pos: &config::Position)
-                                -> (i16, i16, u16, u16) {
+unsafe fn get_monitors(conn: &xcb::Connection, root: u32) -> Vec<Monitor> {
     let screen_res_cookie = xcb::randr::get_screen_resources(&conn, root);
     let screen_res_reply = screen_res_cookie.get_reply().unwrap();
     let outputs = screen_res_reply.outputs();
@@ -210,11 +285,7 @@ unsafe fn get_position_and_size(conn: &xcb::Connection, root: u32, size: config:
     for output in outputs {
         output_cookies.push(xcb::randr::get_output_info(&conn, *output, 0));
     }
-
-    let mut x = 0;
-    let mut y = 0;
-    let mut width = 0;
-    let mut height = 0;
+    let mut ret = Vec::with_capacity(outputs.len());
 
     for out_cookie in output_cookies.iter() {
         if let Ok(reply) = out_cookie.get_reply() {
@@ -225,28 +296,31 @@ unsafe fn get_position_and_size(conn: &xcb::Connection, root: u32, size: config:
                 continue;
             }
 
-            let name = String::from_utf8_lossy(reply.name());
-            println!(" Output:\t{}", name);
-
-            if !is_viable_mon(name.borrow(), pos) {
-                continue;
-            }
-
             let crtc = xcb::randr::get_crtc_info(&conn, reply.crtc(), 0).get_reply().unwrap();
-            println!("\t{}x{}+{}x{}", crtc.width(), crtc.height(), crtc.x(), crtc.y());
 
+            let name = String::from_utf8_lossy(reply.name());
+            let mon = Monitor::from_crtc(name.into(), crtc);
 
-            height = size.get_height(crtc.height() as i32) as u16;
-            width = crtc.width();
-            x = crtc.x();
-            y = crtc.y();
+            ret.push(mon);
         }
     }
 
-    return (x, y, width, height);
+    return ret;
+
 }
 
-unsafe fn create_window(size: config::Size, pos: &config::Position) -> (X11Window, *mut __GLXFBConfigRec) {
+unsafe fn get_monitor<'a>(mons: &'a Vec<Monitor>,
+                          pos: &config::Position)
+                          -> Option<&'a Monitor> {
+    let mut viables: Vec<&Monitor> =
+        mons.into_iter().filter(|mon| is_viable_mon(&mon.name, pos)).collect();
+
+    viables.sort_by(|left, right| sort_mons(pos.get_direction(), left, right));
+
+    return viables.into_iter().next();
+}
+
+unsafe fn create_window(size: &config::Size, pos: &config::Position) -> (X11Window, *mut __GLXFBConfigRec) {
     let (conn, screen_num) = xcb::Connection::connect_with_xlib_display().unwrap();
     conn.set_event_queue_owner(xcb::EventQueueOwner::Xcb);
 
@@ -299,14 +373,13 @@ unsafe fn create_window(size: config::Size, pos: &config::Position) -> (X11Windo
     let win = conn.generate_id();
     let ret_width;
     let ret_height;
+    let mons;
 
     {
         let setup = conn.get_setup();
         let screen = setup.roots().nth((*vi).screen as usize).unwrap();
 
         let _ = xcb::randr::select_input(&conn, screen.root(), xcb::randr::NOTIFY_MASK_CRTC_CHANGE as u16).request_check();
-        println!("Picking last one for now, since that's easiest to implement :)");
-
 
         xcb::create_colormap(&conn, xcb::COLORMAP_ALLOC_NONE as u8,
                 cmap, screen.root(), (*vi).visualid as u32);
@@ -318,16 +391,23 @@ unsafe fn create_window(size: config::Size, pos: &config::Position) -> (X11Windo
             (xcb::CW_COLORMAP, cmap)
         ];
 
-        let (x, y, width, height)  = get_position_and_size(&conn, screen.root(), size, pos);
+        mons = get_monitors(&conn, screen.root());
+
+        let mon = match get_monitor(&mons, pos) {
+            Some(x) => x,
+            None => panic!("Couldn't get a usable monitor"),
+        };
+
+        let geo = Geometry::from_mon_with_conf(&mon, &size, pos.get_direction());
 
         xcb::create_window(&conn, (*vi).depth as u8, win, screen.root(),
-                           x, y, width, height,
+                           geo.x, geo.y, geo.width, geo.height,
                            0, xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
                            (*vi).visualid as u32, &cw_values);
 
-        set_struts(&conn, win, x, y, width, height);
-        ret_width = width;
-        ret_height = height;
+        set_struts(&conn, win, geo.x, geo.y, geo.width, geo.height);
+        ret_width = geo.width;
+        ret_height = geo.height;
     }
 
     xlib::XFree(vi as *mut c_void);
@@ -357,7 +437,7 @@ unsafe fn create_window(size: config::Size, pos: &config::Position) -> (X11Windo
                           screen_num: screen_num, randr_ev: randr_base,
                           height: ret_height as u32, width: ret_width as u32,
                           wm_protocols: wm_protocols, cmap: cmap,
-                          wm_delete_window: wm_delete_window };
+                          wm_delete_window: wm_delete_window, mons: mons };
     return (win, fbc);
 }
 
@@ -415,27 +495,79 @@ unsafe fn make_glcontext(win: &X11Window, fbc: *mut __GLXFBConfigRec) -> *mut __
     gl::GetIntegerv(gl::MAJOR_VERSION, major.as_mut_ptr());
     gl::GetIntegerv(gl::MINOR_VERSION, minor.as_mut_ptr());
 
-    println!("{}.{}", major[0], minor[0]);
+    println!("GLXContext Version: {}.{}", major[0], minor[0]);
 
     return ctx;
 }
 
+fn update_mons(mons: &mut Vec<Monitor>, name: &String, crtc: xcb::randr::CrtcChange) {
+    let mut found = false;
+    for mon in mons.iter_mut() {
+        if &mon.name == name {
+            found = true;
+            mon.update_crtc(crtc);
+        }
+    }
+
+    if !found {
+        let mon = Monitor::from_change(name.clone(), crtc);
+        mons.push(mon);
+    }
+}
+
+unsafe fn handle_randr_event(win: &mut X11Window,
+                          ev: xcb::Event<xcb::ffi::xcb_generic_event_t>,
+                          pos: &config::Position,
+                          size: &config::Size) -> bool {
+    let mut updated = false;
+    let v: &xcb::randr::NotifyEvent = xcb::cast_event(&ev);
+    let d = v.u().cc();
+    let crtc = xcb::randr::get_crtc_info(&win.conn, d.crtc(), 0).get_reply().unwrap();
+    for output in crtc.outputs() {
+        let o = xcb::randr::get_output_info(&win.conn, *output, 0).get_reply().unwrap();
+        let name = String::from_utf8_lossy(o.name()).into();
+        update_mons(&mut win.mons, &name, d);
+
+        /* If the update didn't affect a viable monitor, we can ignore it */
+        if !is_viable_mon(name.borrow(), pos) {
+            println!("Don't care about this change!");
+            continue;
+        }
+        /* A viable monitor changed, so we reset our gemoetry */
+
+        let geo;
+        {
+            let mon = match get_monitor(&win.mons, pos) {
+                Some(x) => x,
+                None => panic!("The chosen mon dissapeared. Hiding isn't implemented yet")
+            };
+            geo = Geometry::from_mon_with_conf(&mon, size, pos.get_direction());
+        }
+        println!("Updating Gemoetry: {:?}", geo);
+        set_geometry(win,
+                     geo.x as i32, geo.y as i32,
+                     geo.width as u32, geo.height as u32);
+        updated = true;
+    }
+
+    return updated;
+}
+
 static mut RUN: bool = true;
 
-unsafe fn handle_event<F, G>(win: &X11Window,
-                          graphics: &mut G,
-                          draw_window: &mut F,
-                          ev: xcb::Event<xcb::ffi::xcb_generic_event_t>)
-        where F: FnMut(&mut G, u32, u32) {
+unsafe fn handle_event(win: &mut X11Window,
+                          ev: xcb::Event<xcb::ffi::xcb_generic_event_t>,
+                          pos: &config::Position,
+                          size: &config::Size) -> bool {
 
     let ev_type = ev.response_type() & !0x80;
-    match ev_type {
+    let ret = match ev_type {
         xcb::EXPOSE => {
-            draw_window(graphics, win.width, win.height);
-            glXSwapBuffers(win.conn.get_raw_dpy(), win.win as xlib::XID);
+            true
         },
         xcb::KEY_PRESS => {
             RUN = false;
+            false
         },
         xcb::CLIENT_MESSAGE => {
             let cmev = xcb::cast_event::<xcb::ClientMessageEvent>(&ev);
@@ -443,8 +575,10 @@ unsafe fn handle_event<F, G>(win: &X11Window,
                 let protocol = cmev.data().data32()[0];
                 if protocol == win.wm_delete_window {
                     RUN = false;
+                    println!("Window got deleted. Stopping");
                 }
             }
+            false
         },
         _ => {
             // following stuff is not obvious at all, but is necessary
@@ -469,63 +603,49 @@ unsafe fn handle_event<F, G>(win: &X11Window,
                         &mut dummy as *mut xlib::XEvent,
                         raw_ev as *mut xlib::xEvent);
                 }
-
+                true
             } else if ev_type == win.randr_ev + xcb::randr::NOTIFY {
-                let v: &xcb::randr::NotifyEvent = xcb::cast_event(&ev);
-                let d = v.u().cc();
-                let crtc = xcb::randr::get_crtc_info(&win.conn, d.crtc(), 0).get_reply().unwrap();
-                for output in crtc.outputs() {
-                    let o = xcb::randr::get_output_info(&win.conn, *output, 0).get_reply().unwrap();
-                    let name = String::from_utf8_lossy(o.name());
-                    println!("Changed config for output: {}", name);
-                    /* TODO: This should be from config, not hardcoded! */
-                    if name == "LVDS1" {
-                        set_geometry(win, d.x() as i32, d.y() as i32, d.width() as u32, 16);
-                    }
-                }
+                handle_randr_event(win, ev, pos, size)
             } else {
-                println!("Xrandr would be: {} + {}", win.randr_ev, xcb::randr::NOTIFY);
                 println!("Got an unkown event!: {}", ev_type);
+                false
             }
         }
-    }
+    };
     win.conn.flush();
+
+    return ret;
 }
 
-unsafe fn poll_event<F, G>(win: &X11Window,
-                        graphics: &mut G,
-                        draw_window: &mut F)
-        where F: FnMut(&mut G, u32, u32) {
+unsafe fn poll_event(win: &mut X11Window,
+                        pos: &config::Position,
+                        size: &config::Size) {
     if let Some(ev) = win.conn.poll_for_event() {
-        handle_event(win, graphics, draw_window, ev);
+        handle_event(win, ev, pos, size);
     }
 }
 
-unsafe fn wait_event<F, G>(win: &X11Window,
-                        graphics: &mut G,
-                        draw_window: &mut F) -> bool
-        where F: FnMut(&mut G, u32, u32) {
+unsafe fn wait_event(win: &mut X11Window,
+                        pos: &config::Position,
+                        size: &config::Size) -> bool {
     if let Some(ev) = win.conn.poll_for_event() {
-        handle_event(win, graphics, draw_window, ev);
+        return handle_event(win, ev, pos, size);
     }
 
     return false;
 }
 
-pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G, size: config::Size,
-                              position: config::Position)
+pub fn do_x11main<F, G, L, V>(mut draw_window: F, create: L, fun_list: G,
+                              size: config::Size, position: config::Position)
     where F: FnMut(&mut V, u32, u32),
           L: FnOnce() -> V,
           G: std::iter::IntoIterator<Item=(c_int, Box<FnMut() -> bool>)> {
     unsafe {
-        let (win, fbc) = create_window(size, &position);
+        let (win, fbc) = create_window(&size, &position);
         let ctx = make_glcontext(&win, fbc);
-        let graphics = create();
-
-        let graphics_cell = RefCell::new(graphics);
-        let fun_cell = RefCell::new(draw_window);
-
+        let mut graphics = create();
         let xcb_fd: c_int = xcb::ffi::base::xcb_get_file_descriptor(win.conn.get_raw_conn());
+        let win_cell = RefCell::new(win);
 
         let xcbt: Token = Token(xcb_fd as usize);
         let poll = Poll::new().unwrap();
@@ -536,8 +656,8 @@ pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G, size: conf
 
         let mut map = HashMap::new();
         map.insert(xcbt, Box::new(||  {
-            wait_event(&win, graphics_cell.borrow_mut().deref_mut(), fun_cell.borrow_mut().deref_mut());
-            return false;
+            wait_event(win_cell.borrow_mut().deref_mut(),
+                       &position, &size)
         }) as Box<FnMut() -> bool>);
 
         for x in fun_list {
@@ -552,14 +672,15 @@ pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G, size: conf
         RUN = true;
 
         loop {
-            poll_event(&win, graphics_cell.borrow_mut().deref_mut(), fun_cell.borrow_mut().deref_mut());
+            poll_event(win_cell.borrow_mut().deref_mut(),
+                       &position, &size);
             poll.poll(&mut events, None).unwrap();
 
             for event in events.iter() {
                 let mut fun = map.get_mut(&event.token()).unwrap();
                 if fun.deref_mut()() {
-                    let mut draw_fun = fun_cell.borrow_mut();
-                    draw_fun.deref_mut()(graphics_cell.borrow_mut().deref_mut(), win.width, win.height);
+                    let win = win_cell.borrow();
+                    draw_window(&mut graphics, win.width, win.height);
                     glXSwapBuffers(win.conn.get_raw_dpy(), win.win as xlib::XID);
                 }
             }
@@ -569,11 +690,7 @@ pub fn do_x11main<F, G, L, V>(draw_window: F, create: L, fun_list: G, size: conf
             }
         }
 
-        // only to make sure that rs_client generate correct names for DRI2
-        // (used to be "*_DRI_2_*")
-        // should be in a "compile tests" section instead of example
-        let _ = xcb::ffi::dri2::XCB_DRI2_ATTACHMENT_BUFFER_ACCUM;
-
+        let win = win_cell.borrow();
         glXDestroyContext(win.conn.get_raw_dpy(), ctx);
 
         xcb::unmap_window(&win.conn, win.win);

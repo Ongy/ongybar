@@ -261,7 +261,7 @@ fn main() {
     let config = parse_or_default_config();
 
     let (updates, mut outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config); 
-    let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSans.ttf").unwrap();
+    let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSansCode.ttf").unwrap();
     outputs.sort_by_key(|ref output| -output.layer);
     let win = Window { outputs: outputs };
     let mut state = OngybarState::new();

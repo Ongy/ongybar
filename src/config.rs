@@ -14,7 +14,7 @@ impl Size {
         match self {
             &Size::Pixels(ref size) => *size,
             &Size::Percent(ref size) => mon * *size / 100,
-            &Size::Font(ref size) => *size * 3 /2,
+            &Size::Font(ref size) => *size * 3 / 2,
         }
     }
 }
@@ -45,6 +45,15 @@ pub enum Direction {
 pub enum Position {
     Global(Direction),
     Monitor(String, Direction),
+}
+
+impl Position {
+    pub fn get_direction(&self) -> &Direction {
+        match self {
+            &Position::Global(ref dir) => dir,
+            &Position::Monitor(_, ref dir) => dir,
+        }
+    }
 }
 
 #[derive(Debug, ConfigAble)]

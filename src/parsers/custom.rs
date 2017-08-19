@@ -75,7 +75,7 @@ fn parse_image<R> (r: &mut R) -> OngyImage
 fn parse_colorfrag<R> (r: &mut R) -> graphics::types::Color
     where R: std::io::Read {
     let mut ret = [0;4];
-    let _ = r.read_exact(&mut ret);
+    r.read_exact(&mut ret).unwrap();
 
     /* This is a bit stupid, but eh */
     return [ret[0] as f32 / 255.0,
@@ -113,7 +113,7 @@ fn parse_draw_elem<R> (r: &mut R) -> DrawCommand
     where R: std::io::Read {
 
     let mut type_enum = [0xff;1];
-    let _ = r.read(&mut type_enum);
+    r.read(&mut type_enum).unwrap();
     match type_enum[0] {
         1 => { /* 1 is the Rectangle */
             let x1 = r.read_u16::<byteorder::NativeEndian>().unwrap();
@@ -157,7 +157,7 @@ impl<'a, R> Iterator for DrawIter<'a, R>
 fn parse_draw<R> (r: &mut R) -> OngyDraw
     where R: std::io::Read {
     let mut buffer = [1];
-    let _ = r.read(&mut buffer);
+    r.read(&mut buffer).unwrap();
 
     let coords = match buffer[0] {
         0 => Coordtype::Absolute,
@@ -170,7 +170,7 @@ fn parse_draw<R> (r: &mut R) -> OngyDraw
             },
     };
 
-    let _ = r.read(&mut buffer);
+    r.read(&mut buffer).unwrap();
 
     return OngyDraw::new(coords, DrawIter::new(r, buffer[0]));
 }
@@ -181,7 +181,7 @@ fn parse_elem<G, C, R> (r: &mut R) -> Option<Box<Renderable<G, C>>>
           R: std::io::Read {
     /* Ok, we will read one element at a time. So we first read in the type enum value */
     let mut type_enum = [0;1];
-    let _ = r.read(&mut type_enum);
+    r.read(&mut type_enum).unwrap();
     match type_enum[0] {
         0 => return Some(Box::new(custom_parse(r))),
         1 => return Some(Box::new(parse_text(r))),
@@ -207,7 +207,7 @@ impl<'a, G, C, R> Iterator for CustomIter<'a, G, C, R>
         /* Ok, we are starting up. First read in the number of elements in the list */
         if let None = self.num {
             let mut buffer = [1];
-            let _ = self.r.read(&mut buffer);
+            self.r.read(&mut buffer).unwrap();
             self.num = Some(buffer[0]);
         }
 
