@@ -4,6 +4,7 @@ extern crate rs_config;
 
 extern crate graphics;
 extern crate opengl_graphics;
+extern crate texture;
 
 extern crate xdg;
 
@@ -260,8 +261,12 @@ fn parse_or_default_config() -> config::Config {
 fn main() {
     let config = parse_or_default_config();
 
-    let (updates, mut outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config); 
-    let mut glyphs = opengl_graphics::glyph_cache::GlyphCache::new("/usr/share/fonts/TTF/DejaVuSansCode.ttf").unwrap();
+    let (updates, mut outputs) = make_outputs::<opengl_graphics::GlGraphics, opengl_graphics::glyph_cache::GlyphCache>(&config);
+    let mut settings = texture::TextureSettings::new();
+    settings.set_filter(texture::Filter::Nearest);
+    let mut glyphs =
+        opengl_graphics::glyph_cache::GlyphCache::new(
+            "/usr/share/fonts/TTF/DejaVuSansCode.ttf", settings).unwrap();
     outputs.sort_by_key(|ref output| -output.layer);
     let win = Window { outputs: outputs };
     let mut state = OngybarState::new();
